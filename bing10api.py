@@ -79,6 +79,18 @@ def bing_api_post2() -> Dict[str, Any]:
     return bing(request.get_json(), 2)
 
 
+@FLASK_APP.route('/bing', methods=['POST'])
+def bing_api_post() -> Dict[str, Any]:
+    """
+    API endpoint for generating images using Bing.
+
+    x10 times bing repeat
+
+    :return: A JSON response containing a list of URLs or an error message.
+    """
+    return bing(request.get_json(), 1)
+
+
 @async_run
 def run_flask(addr: str ='127.0.0.1', port: int = 58796):
     try:
