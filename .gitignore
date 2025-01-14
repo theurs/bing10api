@@ -1,0 +1,4 @@
+cfg.py
+cookies/*
+logs/*
+__pycache__/*
