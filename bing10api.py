@@ -95,3 +95,9 @@ if __name__ == '__main__':
 
     while 1:
         time.sleep(1)
+
+
+
+# curl -X POST   -H "Content-Type: application/json"   -d '{
+#     "prompt": "a beautiful landscape"
+#   }'   http://172.28.1.6:58796/bing2
