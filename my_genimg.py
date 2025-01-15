@@ -32,7 +32,7 @@ def bing(prompt: str):
             images = bing_img.gen_images(prompt)
             if any([x for x in images if not x.startswith('https://')]):
                 return images
-            time.sleep(20)
+            time.sleep(30)
 
         if type(images) == list:
             return list(set(images))
