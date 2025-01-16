@@ -2,3 +2,4 @@ cfg.py
 cookies/*
 logs/*
 __pycache__/*
+*.txt

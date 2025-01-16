@@ -3,3 +3,6 @@ aiohttp
 bs4
 
 Flask
+
+regex
+requests

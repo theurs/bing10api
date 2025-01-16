@@ -6,7 +6,7 @@ import time
 import threading
 
 
-import bing_img
+import bing_genimg_v3
 import my_log
 
 
@@ -25,13 +25,12 @@ def bing(prompt: str):
     prompt = prompt[:950] # нельзя больше 950?
 
     try:
-        if bing_img.PAUSED['time'] > time.time():
-            return []
-
         with BING_LOCK:
-            images = bing_img.gen_images(prompt)
+            images = bing_genimg_v3.gen_images(prompt)
+            # если нет картинок (есьт только ошибки)
             if any([x for x in images if not x.startswith('https://')]):
                 return images
+            # 30 секунд пауза между запросами
             time.sleep(30)
 
         if type(images) == list:
