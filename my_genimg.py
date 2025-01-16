@@ -22,7 +22,7 @@ def bing(prompt: str):
     Предполагается что промпт уже прошел модерацию
     """
 
-    prompt = prompt[:950] # нельзя больше 950?
+    # prompt = prompt[:950] # нельзя больше 950?
 
     try:
         with BING_LOCK:
