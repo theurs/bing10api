@@ -56,7 +56,11 @@ def gen_images_bing_only(prompt: str, iterations: int = 1) -> list:
     images = []
 
     for _ in range(iterations):
-        images += bing(prompt)
+        r = bing(prompt)
+        if r:
+            images += r
+        else:
+            break
 
     return images
 
