@@ -144,6 +144,7 @@ class BingBrush:
                 )
                 if redirect_url is None:
                     my_log.log_bing_api('bing_genimg_v3:process: ==> Error occurs, please submit an issue at https://github.com/vra/bing_brush, I will fix it as soon as possible.')
+                    time.sleep(2 * 60)
                     return []
 
             img_urls = self.obtaion_image_url(redirect_url, request_id, url_encoded_prompt)
