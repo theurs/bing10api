@@ -9,8 +9,14 @@ import cfg
 import my_genimg
 import my_log
 
-
+import rotate_cookie
 from utils import async_run
+
+
+# сколько раз подряд должно быть фейлов что бы приняьт меры - сменить куки
+MAX_COOKIE_FAIL = 5
+COOKIE_FAIL = 0
+COOKIE_INITIALIZED = False
 
 
 ## rest api #######################################################################
@@ -21,7 +27,18 @@ FLASK_APP = Flask(__name__)
 
 
 def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
+    '''
+    Делает 1 запрос на рисование бингом.
+    Если не получилось - возвращает ошибку.
+    Если не получилось 5 раз подряд то пытается сменить куки.
+    '''
     try:
+        global COOKIE_FAIL, COOKIE_INITIALIZED
+
+        if not COOKIE_INITIALIZED:
+            rotate_cookie.rotate_cookie()
+            COOKIE_INITIALIZED = True
+
         # Get JSON data from the request
         data: Dict[str, Any] = j
 
@@ -35,6 +52,12 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
         image_urls: List[str] = my_genimg.gen_images_bing_only(prompt, iterations)
 
         if not image_urls:
+            COOKIE_FAIL += 1
+
+            if COOKIE_FAIL >= MAX_COOKIE_FAIL:
+                COOKIE_FAIL = 0
+                rotate_cookie.rotate_cookie()
+
             return jsonify({"error": "No images generated"}), 404
 
         return jsonify({"urls": image_urls}), 200
