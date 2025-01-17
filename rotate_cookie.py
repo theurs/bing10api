@@ -27,6 +27,7 @@ def rotate_cookie():
             natsorted(FILES)
 
         if FILES:
+            my_log.log2('rotate_cookie: \n\n' + '\n'.join(FILES))
             source_name = FILES.pop(0)
             with open(source_name, 'r') as source:
                 with open('cookie.txt', 'w') as target:
