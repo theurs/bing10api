@@ -31,6 +31,7 @@ def rotate_cookie():
             with open(source_name, 'r') as source:
                 with open('cookie.txt', 'w') as target:
                     target.write(source.read())
+                    my_log.log2(f'rotate_cookie: {source_name} -> cookie.txt')
         else:
             my_log.log2('rotate_cookie: no cookie files found')
 
