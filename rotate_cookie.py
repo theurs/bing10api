@@ -24,7 +24,7 @@ def rotate_cookie():
 
         if not FILES:
             FILES = [f for f in os.listdir('.') if f.startswith('cookie') and f.endswith('.txt') and os.path.isfile(f) and f != 'cookie.txt']
-            natsorted(FILES)
+            FILES = natsorted(FILES)
 
         if FILES:
             my_log.log2('rotate_cookie: \n\n' + '\n'.join(FILES))
