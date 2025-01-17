@@ -59,6 +59,8 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
                 rotate_cookie.rotate_cookie()
 
             return jsonify({"error": "No images generated"}), 404
+        else:
+            COOKIE_FAIL = 0
 
         return jsonify({"urls": image_urls}), 200
     except Exception as e:
