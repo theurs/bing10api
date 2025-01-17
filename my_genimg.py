@@ -28,14 +28,13 @@ def bing(prompt: str):
         with BING_LOCK:
             images = bing_genimg_v3.gen_images(prompt)
 
-            # 30 секунд пауза между запросами
-            time.sleep(30)
-
-            # если нет картинок (есть только ошибки)
+            # если нет картинок (есть только ошибки) то сразу вернуть отказ
             if any([x for x in images if not x.startswith('https://')]):
                 return images
 
         if type(images) == list:
+            # 30 секунд пауза между запросами
+            time.sleep(30)
             return list(set(images))
 
     except Exception as error_bing_img:
