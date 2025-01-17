@@ -4,6 +4,8 @@
 import os
 import traceback
 
+from natsort import natsorted
+
 import my_log
 
 
@@ -22,6 +24,7 @@ def rotate_cookie():
 
         if not FILES:
             FILES = [f for f in os.listdir('.') if f.startswith('cookie') and f.endswith('.txt') and os.path.isfile(f) and f != 'cookie.txt']
+            natsorted(FILES)
 
         if FILES:
             source_name = FILES.pop(0)

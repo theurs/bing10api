@@ -4,5 +4,7 @@ bs4
 
 Flask
 
+natsort
+
 regex
 requests
