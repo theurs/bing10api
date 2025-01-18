@@ -33,8 +33,8 @@ def bing(prompt: str):
                 return images
 
         if type(images) == list:
-            # 30 секунд пауза между запросами
-            time.sleep(30)
+            # пауза между запросами
+            time.sleep(4)
             return list(set(images))
 
     except Exception as error_bing_img:
