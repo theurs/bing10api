@@ -13,10 +13,13 @@ import rotate_cookie
 from utils import async_run
 
 
-# сколько раз подряд должно быть фейлов что бы приняьт меры - сменить куки
+# сколько раз подряд должно быть фейлов что бы принять меры - сменить куки
 MAX_COOKIE_FAIL = 5
 COOKIE_FAIL = 0
 COOKIE_INITIALIZED = False
+# сколько раз подряд должно быть фейлов что бы принять меры - выключить сервис
+MAX_COOKIE_FAIL_FOR_TERMINATE = 20
+COOKIE_FAIL_FOR_TERMINATE = 0
 
 
 ## rest api #######################################################################
@@ -33,7 +36,10 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
     Если не получилось 5 раз подряд то пытается сменить куки.
     '''
     try:
-        global COOKIE_FAIL, COOKIE_INITIALIZED
+        global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE
+
+        if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE:
+            return jsonify({"error": "Service is disabled"}), 500
 
         if not COOKIE_INITIALIZED:
             rotate_cookie.rotate_cookie()
@@ -53,6 +59,7 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
 
         if not image_urls:
             COOKIE_FAIL += 1
+            COOKIE_FAIL_FOR_TERMINATE += 1
 
             if COOKIE_FAIL >= MAX_COOKIE_FAIL:
                 COOKIE_FAIL = 0
@@ -61,6 +68,7 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
             return jsonify({"error": "No images generated"}), 404
         else:
             COOKIE_FAIL = 0
+            COOKIE_FAIL_FOR_TERMINATE = 0
 
         return jsonify({"urls": image_urls}), 200
     except Exception as e:
