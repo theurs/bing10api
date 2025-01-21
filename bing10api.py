@@ -10,7 +10,7 @@ import my_genimg
 import my_log
 
 import rotate_cookie
-from utils import async_run
+from utils import async_run, seconds_to_hms
 
 
 # сколько раз подряд должно быть фейлов что бы принять меры - сменить куки
@@ -20,7 +20,8 @@ COOKIE_INITIALIZED = False
 # сколько раз подряд должно быть фейлов что бы принять меры - выключить сервис
 MAX_COOKIE_FAIL_FOR_TERMINATE = 20
 COOKIE_FAIL_FOR_TERMINATE = 0
-
+SUSPEND_TIME = 0 # время когда можно снова запустить сервис
+SUSPEND_TIME_SET = 12 * 60 * 60 # время в секундах до следующего запуска сервиса (12 часов)
 
 ## rest api #######################################################################
 
@@ -34,12 +35,23 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
     Делает 1 запрос на рисование бингом.
     Если не получилось - возвращает ошибку.
     Если не получилось 5 раз подряд то пытается сменить куки.
+    Если не получилось 20 раз подряд то выключает сервис на 12 часов.
     '''
     try:
-        global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE
+        global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE, SUSPEND_TIME
 
         if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE:
-            return jsonify({"error": "Service is disabled"}), 500
+            if SUSPEND_TIME and SUSPEND_TIME > time.time():
+                return jsonify({"error": "Service is disabled, time to next start is " + seconds_to_hms(int(SUSPEND_TIME - time.time())) + " seconds"}), 500
+            elif SUSPEND_TIME == 0:
+                SUSPEND_TIME = time.time() + SUSPEND_TIME_SET
+                my_log.log2(f'Suspend service: {seconds_to_hms(int(SUSPEND_TIME_SET))}')
+                return jsonify({"error": "Service is disabled for " + seconds_to_hms(int(SUSPEND_TIME_SET)) + " seconds"}), 500
+            elif SUSPEND_TIME and SUSPEND_TIME < time.time():
+                my_log.log2(f'Restart service')
+                SUSPEND_TIME = 0
+                COOKIE_FAIL_FOR_TERMINATE = 0
+                COOKIE_FAIL = 0
 
         if not COOKIE_INITIALIZED:
             rotate_cookie.rotate_cookie()
@@ -127,7 +139,7 @@ def bing_api_post() -> Dict[str, Any]:
 @async_run
 def run_flask(addr: str ='127.0.0.1', port: int = 58796):
     try:
-        FLASK_APP.run(debug=True, use_reloader=False, host=addr, port = port)
+        FLASK_APP.run(debug=False, use_reloader=False, host=addr, port = port)
     except Exception as error:
         my_log.log_bing_api(f'tb:run_flask: {error}')
 
@@ -137,7 +149,7 @@ def run_flask(addr: str ='127.0.0.1', port: int = 58796):
 
 if __name__ == '__main__':
     run_flask(addr=cfg.ADDR, port=cfg.PORT)
-
+    my_log.log2(f'run_flask: {cfg.ADDR}:{cfg.PORT} started')
     while 1:
         time.sleep(1)
 
