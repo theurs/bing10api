@@ -3,3 +3,4 @@ cookies/*
 logs/*
 __pycache__/*
 *.txt
+test.py
