@@ -89,14 +89,14 @@ class BingBrush:
         return redirect_url, request_id
 
     def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
-        self.session.get(f"https://www.bing.com{redirect_url}")
+        self.session.get(f"https://www.bing.com{redirect_url}", timeout=self.max_wait_time)
         polling_url = f"https://www.bing.com/images/create/async/results/{request_id}?q={url_encoded_prompt}"
         # Poll for results
         start_wait = time.time()
         while True:
             if int(time.time() - start_wait) > self.max_wait_time:
                 raise Exception(self.error_message_dict["error_timeout"])
-            response = self.session.get(polling_url)
+            response = self.session.get(polling_url, timeout=self.max_wait_time)
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
             if not response.text or response.text.find("errorMessage") != -1:
