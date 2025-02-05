@@ -70,6 +70,7 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
             REQUESTS_BEFORE_ROTATE_COOKIE = 0
             COOKIE_FAIL = 0
             COOKIE_FAIL_FOR_TERMINATE = 0
+            my_log.log2(f'rotate_cookie: after {MAX_REQUESTS_BEFORE_ROTATE_COOKIE} requests')
         else:
             REQUESTS_BEFORE_ROTATE_COOKIE += 1
 
