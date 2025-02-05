@@ -23,6 +23,11 @@ COOKIE_FAIL_FOR_TERMINATE = 0
 SUSPEND_TIME = 0 # время когда можно снова запустить сервис
 SUSPEND_TIME_SET = 12 * 60 * 60 # время в секундах до следующего запуска сервиса (12 часов)
 
+# после такого количества запросов принудительно сменить куки
+MAX_REQUESTS_BEFORE_ROTATE_COOKIE = 50
+REQUESTS_BEFORE_ROTATE_COOKIE = 0
+
+
 ## rest api #######################################################################
 
 
@@ -39,6 +44,7 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
     '''
     try:
         global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE, SUSPEND_TIME
+        global REQUESTS_BEFORE_ROTATE_COOKIE
 
         if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE:
             if SUSPEND_TIME and SUSPEND_TIME > time.time():
@@ -56,6 +62,17 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
         if not COOKIE_INITIALIZED:
             rotate_cookie.rotate_cookie()
             COOKIE_INITIALIZED = True
+
+
+        # принудительно сменить куки после определенного количества запросов
+        if REQUESTS_BEFORE_ROTATE_COOKIE > MAX_REQUESTS_BEFORE_ROTATE_COOKIE:
+            rotate_cookie.rotate_cookie()
+            REQUESTS_BEFORE_ROTATE_COOKIE = 0
+            COOKIE_FAIL = 0
+            COOKIE_FAIL_FOR_TERMINATE = 0
+        else:
+            REQUESTS_BEFORE_ROTATE_COOKIE += 1
+
 
         # Get JSON data from the request
         data: Dict[str, Any] = j
