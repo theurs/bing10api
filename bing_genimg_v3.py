@@ -20,7 +20,7 @@ class BingBrush:
         self,
         cookie,
         verbose=False,
-        max_wait_time=60,
+        max_wait_time=90,
     ):
         self.max_wait_time = max_wait_time
         self.verbose = verbose
