@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import subprocess
 import time
 
 from flask import Flask, request, jsonify
@@ -52,6 +53,15 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
             elif SUSPEND_TIME == 0:
                 SUSPEND_TIME = time.time() + SUSPEND_TIME_SET
                 my_log.log2(f'Suspend service: {seconds_to_hms(int(SUSPEND_TIME_SET))}')
+
+                # Проверку и выполнение команды из cfg.CMD_ON_STOP
+                if hasattr(cfg, 'CMD_ON_STOP') and cfg.CMD_ON_STOP:
+                    try:
+                        my_log.log2(f'Executing CMD_ON_STOP: {cfg.CMD_ON_STOP}')
+                        subprocess.Popen(cfg.CMD_ON_STOP, shell=True)
+                    except Exception as cmd_e:
+                        my_log.log2(f'Error executing CMD_ON_STOP: {cmd_e}')
+
                 return jsonify({"error": "Service is disabled for " + seconds_to_hms(int(SUSPEND_TIME_SET)) + " seconds"}), 500
             elif SUSPEND_TIME and SUSPEND_TIME < time.time():
                 my_log.log2(f'Restart service')
@@ -103,6 +113,27 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
         return jsonify({"urls": image_urls}), 200
     except Exception as e:
         my_log.log_bing_api(f'tb:bing: {e}')
+        return jsonify({"error": str(e)}), 500
+
+
+@FLASK_APP.route('/reload_cookies', methods=['POST'])
+def reload_cookies_api() -> Dict[str, Any]:
+    """
+    API endpoint for reloading Bing cookies.
+
+    :return: A JSON response indicating success or failure.
+    """
+    try:
+        rotate_cookie.rotate_cookie()
+        global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE, REQUESTS_BEFORE_ROTATE_COOKIE
+        COOKIE_FAIL = 0
+        COOKIE_INITIALIZED = True
+        COOKIE_FAIL_FOR_TERMINATE = 0
+        REQUESTS_BEFORE_ROTATE_COOKIE = 0
+        my_log.log2('Cookies reloaded successfully via API.')
+        return jsonify({"message": "Cookies reloaded successfully"}), 200
+    except Exception as e:
+        my_log.log_bing_api(f'tb:reload_cookies_api: {e}')
         return jsonify({"error": str(e)}), 500
 
 
