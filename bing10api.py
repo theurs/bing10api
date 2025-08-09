@@ -36,7 +36,7 @@ REQUESTS_BEFORE_ROTATE_COOKIE = 0
 FLASK_APP = Flask(__name__)
 
 
-def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
+def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any]:
     '''
     Делает 1 запрос на рисование бингом.
     Если не получилось - возвращает ошибку.
@@ -95,7 +95,7 @@ def bing(j: Dict[str, Any], iterations=1) -> Dict[str, Any]:
             return jsonify({"error": "Prompt is required"}), 400
 
         # Generate images using Bing API
-        image_urls: List[str] = my_genimg.gen_images_bing_only(prompt, iterations)
+        image_urls: List[str] = my_genimg.gen_images_bing_only(prompt, iterations, model=model)
 
         if not image_urls:
             COOKIE_FAIL += 1
@@ -154,7 +154,7 @@ def bing_api_post20() -> Dict[str, Any]:
     """
     API endpoint for generating images using Bing.
 
-    x10 times bing repeat
+    x20 times bing repeat
 
     :return: A JSON response containing a list of URLs or an error message.
     """
@@ -166,7 +166,7 @@ def bing_api_post2() -> Dict[str, Any]:
     """
     API endpoint for generating images using Bing.
 
-    x10 times bing repeat
+    x2 times bing repeat
 
     :return: A JSON response containing a list of URLs or an error message.
     """
@@ -178,11 +178,19 @@ def bing_api_post() -> Dict[str, Any]:
     """
     API endpoint for generating images using Bing.
 
-    x10 times bing repeat
-
     :return: A JSON response containing a list of URLs or an error message.
     """
     return bing(request.get_json(), 1)
+
+
+@FLASK_APP.route('/bing_gpt', methods=['POST'])
+def bing_api_post_gpt() -> Dict[str, Any]:
+    """
+    API endpoint for generating images using Bing with gpt.
+
+    :return: A JSON response containing a list of URLs or an error message.
+    """
+    return bing(request.get_json(), 1, model='gpt4o')
 
 
 @async_run

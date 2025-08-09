@@ -2,6 +2,8 @@
 # https://github.com/vra/bing_brush
 
 
+import json
+import html
 import os
 import random
 import time
@@ -89,7 +91,8 @@ class BingBrush:
         request_id = redirect_url.split("id=")[-1]
         return redirect_url, request_id
 
-    def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
+
+    def obtaion_image_url_dalle(self, redirect_url, request_id, url_encoded_prompt):
         self.session.get(f"https://www.bing.com{redirect_url}", timeout=self.max_wait_time)
         polling_url = f"https://www.bing.com/images/create/async/results/{request_id}?q={url_encoded_prompt}"
         # Poll for results
@@ -112,10 +115,88 @@ class BingBrush:
 
         return normal_image_links
 
-    def send_request(self, prompt, rt_type=4):
+
+    def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
+
+        # Получаем страницу-заглушку, чтобы найти URL для поллинга
+        initial_page_response = self.session.get(
+            f"https://www.bing.com{redirect_url}",
+            timeout=self.max_wait_time
+        )
+        if initial_page_response.status_code != 200:
+            raise Exception("Failed to load result page.")
+
+        polling_url_match = regex.search(r'data-c="([^"]+)"', initial_page_response.text)
+        if not polling_url_match:
+            raise Exception("Could not find polling URL (data-c attribute).")
+        
+        polling_url = html.unescape(polling_url_match.group(1))
+        full_polling_url = f"https://www.bing.com{polling_url}"
+
+        start_wait = time.time()
+        latest_thumbnail_id = None
+        seen_ids = set()
+        # Порог остановки - 5 уникальных итерации изображения
+        FINAL_ITERATION_THRESHOLD = 5 
+
+        while True:
+            if int(time.time() - start_wait) > self.max_wait_time:
+                if latest_thumbnail_id:
+                    break 
+                raise Exception(self.error_message_dict["error_timeout"])
+
+            response = self.session.get(full_polling_url, timeout=self.max_wait_time)
+            
+            if response.status_code != 200:
+                raise Exception(self.error_message_dict["error_noresults"])
+
+            if not response.text:
+                time.sleep(2)
+                continue
+
+            m_json_blobs = regex.findall(r'm="([^"]+)"', response.text)
+            if m_json_blobs:
+                try:
+                    unescaped_blob = html.unescape(m_json_blobs[-1])
+                    m_data = json.loads(unescaped_blob)
+                    
+                    if "ThumbnailInfo" in m_data and m_data["ThumbnailInfo"]:
+                        thumbnail_id = m_data["ThumbnailInfo"][0].get("ThumbnailId")
+                        if thumbnail_id:
+                            latest_thumbnail_id = thumbnail_id
+                            seen_ids.add(thumbnail_id)
+                            # print(f"https://thf.bing.com/th/id/{thumbnail_id}")
+                except Exception:
+                    pass
+            else:
+                latest_thumbnail_id = '' # заблокировали
+                break
+            
+            # НОВОЕ УСЛОВИЕ ОСТАНОВКИ: выходим, если собрали достаточно итераций
+            if len(seen_ids) >= FINAL_ITERATION_THRESHOLD:
+                break
+            
+            time.sleep(2)
+
+        if latest_thumbnail_id:
+            # Собираем чистый URL без параметров
+            final_url = f"https://thf.bing.com/th/id/{latest_thumbnail_id}"
+            return [final_url]
+        else:
+            my_log.log_bing_api("bing_genimg_v3:process: Polling finished without finding any thumbnail ID.")
+            return []
+
+
+    def send_request(self, prompt, model="gpt4o", rt_type=4):
+        # Маппинг имени модели на ее ID
+        model_id = "1" if model == "gpt4o" else "0"
+
         url_encoded_prompt = requests.utils.quote(prompt)
         payload = f"q={url_encoded_prompt}&qs=ds"
-        url = f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt={rt_type}&FORM=GENCRE"
+
+        # Используем model_id вместо имени
+        url = f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt={rt_type}&mdl={model_id}&FORM=GENCRE"
+
         response = self.session.post(
             url,
             allow_redirects=False,
@@ -124,10 +205,14 @@ class BingBrush:
         )
         return response, url_encoded_prompt
 
-    def process(self, prompt):
-        # rt=4 means the reward pipeline, run faster than the pipeline without reward (rt=3)
+    def process(self, prompt, model="dalle"):
+        """
+        Основной метод для генерации изображений.
+        model: "dalle" или "gpt4o"
+        """
         try:
-            response, url_encoded_prompt = self.send_request(prompt, rt_type=4)
+            # Сначала пробуем быстрый канал (rt=4)
+            response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=4)
 
             if response.status_code != 302:
                 self.process_error(response)
@@ -136,24 +221,30 @@ class BingBrush:
             redirect_url, request_id = self.request_result_urls(
                 response, url_encoded_prompt
             )
-            if redirect_url is None:
-                # reward is empty, use rt=3 for slow response
-                my_log.log_bing_api('bing_genimg_v3:process: ==> Your boosts have run out, using the slow generating pipeline, please wait...')
 
-                response, url_encoded_prompt = self.send_request(prompt, rt_type=3)
+            # Если бусты кончились, пробуем медленный (rt=3)
+            if redirect_url is None:
+                my_log.log_bing_api('bing_genimg_v3:process: ==> Your boosts have run out, using the slow generating pipeline, please wait...')
+                response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=3)
                 redirect_url, request_id = self.request_result_urls(
                     response, url_encoded_prompt
                 )
                 if redirect_url is None:
                     my_log.log_bing_api('bing_genimg_v3:process: ==> Error occurs, please submit an issue at https://github.com/vra/bing_brush, I will fix it as soon as possible.')
-                    # time.sleep(2 * 60)
                     return []
 
-            img_urls = self.obtaion_image_url(redirect_url, request_id, url_encoded_prompt)
-
-            img_urls = [x for x in img_urls if x.startswith('http') and 'bing.net/th/id/' in x]
-            my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
-            return img_urls
+            if model == 'gpt4o':
+                img_urls = self.obtaion_image_url(redirect_url, request_id, url_encoded_prompt)
+                if len(img_urls) > 1:
+                    img_urls = [x for x in img_urls if x.startswith('http') and 'bing.net/th/id/' in x]
+                my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
+                return img_urls
+            else:
+                img_urls = self.obtaion_image_url_dalle(redirect_url, request_id, url_encoded_prompt)
+                img_urls = [x for x in img_urls if x.startswith('http') and 'bing.net/th/id/' in x]
+                my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
+                return img_urls
+                
 
         except Exception as unknown_error:
             traceback_error = traceback.format_exc()
@@ -161,11 +252,11 @@ class BingBrush:
             return []
 
 
-def gen_images(prompt: str) -> list:
+def gen_images(prompt: str, model: str = 'dalle') -> list:
     brush = BingBrush(cookie='cookie.txt')
-    r = brush.process(prompt)
+    r = brush.process(prompt, model=model)
     return r
 
 
 if __name__ == "__main__":
-    print(gen_images('большой красивый кот на стуле...\n\nочень большой...'))
+    print(gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o'))
