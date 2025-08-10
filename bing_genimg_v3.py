@@ -116,9 +116,10 @@ class BingBrush:
         return normal_image_links
 
     def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
+        timeout = self.max_wait_time + 60
         initial_page_response = self.session.get(
             f"https://www.bing.com{redirect_url}",
-            timeout=self.max_wait_time
+            timeout=timeout
         )
         if initial_page_response.status_code != 200:
             raise Exception("Failed to load result page.")
@@ -135,12 +136,12 @@ class BingBrush:
 
         while True:
             elapsed = time.time() - start_wait
-            if elapsed > self.max_wait_time:
+            if elapsed > timeout:
                 if latest_thumbnail_id:
                     break
                 raise Exception(self.error_message_dict["error_timeout"])
 
-            response = self.session.get(full_polling_url, timeout=self.max_wait_time)
+            response = self.session.get(full_polling_url, timeout=timeout)
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
 
