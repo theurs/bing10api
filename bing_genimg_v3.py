@@ -115,10 +115,7 @@ class BingBrush:
 
         return normal_image_links
 
-
     def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
-
-        # Получаем страницу-заглушку, чтобы найти URL для поллинга
         initial_page_response = self.session.get(
             f"https://www.bing.com{redirect_url}",
             timeout=self.max_wait_time
@@ -129,62 +126,117 @@ class BingBrush:
         polling_url_match = regex.search(r'data-c="([^"]+)"', initial_page_response.text)
         if not polling_url_match:
             raise Exception("Could not find polling URL (data-c attribute).")
-        
+
         polling_url = html.unescape(polling_url_match.group(1))
         full_polling_url = f"https://www.bing.com{polling_url}"
 
         start_wait = time.time()
         latest_thumbnail_id = None
-        seen_ids = set()
-        # Порог остановки - 5 уникальных итерации изображения
-        FINAL_ITERATION_THRESHOLD = 5 
 
         while True:
-            if int(time.time() - start_wait) > self.max_wait_time:
+            elapsed = time.time() - start_wait
+            if elapsed > self.max_wait_time:
                 if latest_thumbnail_id:
-                    break 
+                    break
                 raise Exception(self.error_message_dict["error_timeout"])
 
             response = self.session.get(full_polling_url, timeout=self.max_wait_time)
-            
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
 
-            if not response.text:
-                time.sleep(2)
-                continue
+            # Проверяем маркер завершения генерации
+            if 'data-stpstr="1"' in response.text:
+                m_json_blobs = regex.findall(r'm="([^"]+)"', response.text)
+                if m_json_blobs:
+                    try:
+                        unescaped_blob = html.unescape(m_json_blobs[-1])
+                        m_data = json.loads(unescaped_blob)
+                        if "ThumbnailInfo" in m_data and m_data["ThumbnailInfo"]:
+                            thumbnail_id = m_data["ThumbnailInfo"][0].get("ThumbnailId")
+                            if thumbnail_id:
+                                latest_thumbnail_id = thumbnail_id
+                                break
+                    except Exception:
+                        pass
 
-            m_json_blobs = regex.findall(r'm="([^"]+)"', response.text)
-            if m_json_blobs:
-                try:
-                    unescaped_blob = html.unescape(m_json_blobs[-1])
-                    m_data = json.loads(unescaped_blob)
-                    
-                    if "ThumbnailInfo" in m_data and m_data["ThumbnailInfo"]:
-                        thumbnail_id = m_data["ThumbnailInfo"][0].get("ThumbnailId")
-                        if thumbnail_id:
-                            latest_thumbnail_id = thumbnail_id
-                            seen_ids.add(thumbnail_id)
-                            # print(f"https://thf.bing.com/th/id/{thumbnail_id}")
-                except Exception:
-                    pass
-            else:
-                latest_thumbnail_id = '' # заблокировали
-                break
-            
-            # НОВОЕ УСЛОВИЕ ОСТАНОВКИ: выходим, если собрали достаточно итераций
-            if len(seen_ids) >= FINAL_ITERATION_THRESHOLD:
-                break
-            
             time.sleep(2)
 
         if latest_thumbnail_id:
-            # Собираем чистый URL без параметров
-            final_url = f"https://thf.bing.com/th/id/{latest_thumbnail_id}"
-            return [final_url]
+            return [f"https://thf.bing.com/th/id/{latest_thumbnail_id}"]
         else:
-            my_log.log_bing_api("bing_genimg_v3:process: Polling finished without finding any thumbnail ID.")
+            my_log.log_bing_api("bing_genimg_v3:process: No completed image found within timeout.")
             return []
+
+
+    # def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
+
+    #     # Получаем страницу-заглушку, чтобы найти URL для поллинга
+    #     initial_page_response = self.session.get(
+    #         f"https://www.bing.com{redirect_url}",
+    #         timeout=self.max_wait_time
+    #     )
+    #     if initial_page_response.status_code != 200:
+    #         raise Exception("Failed to load result page.")
+
+    #     polling_url_match = regex.search(r'data-c="([^"]+)"', initial_page_response.text)
+    #     if not polling_url_match:
+    #         raise Exception("Could not find polling URL (data-c attribute).")
+
+    #     polling_url = html.unescape(polling_url_match.group(1))
+    #     full_polling_url = f"https://www.bing.com{polling_url}"
+
+    #     start_wait = time.time()
+    #     latest_thumbnail_id = None
+    #     seen_ids = set()
+    #     # Порог остановки - 5 уникальных итерации изображения
+    #     FINAL_ITERATION_THRESHOLD = 5 
+
+    #     while True:
+    #         if int(time.time() - start_wait) > self.max_wait_time:
+    #             if latest_thumbnail_id:
+    #                 break 
+    #             raise Exception(self.error_message_dict["error_timeout"])
+
+    #         response = self.session.get(full_polling_url, timeout=self.max_wait_time)
+
+    #         if response.status_code != 200:
+    #             raise Exception(self.error_message_dict["error_noresults"])
+
+    #         if not response.text:
+    #             time.sleep(2)
+    #             continue
+
+    #         m_json_blobs = regex.findall(r'm="([^"]+)"', response.text)
+    #         if m_json_blobs:
+    #             try:
+    #                 unescaped_blob = html.unescape(m_json_blobs[-1])
+    #                 m_data = json.loads(unescaped_blob)
+                    
+    #                 if "ThumbnailInfo" in m_data and m_data["ThumbnailInfo"]:
+    #                     thumbnail_id = m_data["ThumbnailInfo"][0].get("ThumbnailId")
+    #                     if thumbnail_id:
+    #                         latest_thumbnail_id = thumbnail_id
+    #                         seen_ids.add(thumbnail_id)
+    #                         # print(f"https://thf.bing.com/th/id/{thumbnail_id}")
+    #             except Exception:
+    #                 pass
+    #         else:
+    #             latest_thumbnail_id = '' # заблокировали
+    #             break
+
+    #         # НОВОЕ УСЛОВИЕ ОСТАНОВКИ: выходим, если собрали достаточно итераций
+    #         if len(seen_ids) >= FINAL_ITERATION_THRESHOLD:
+    #             break
+
+    #         time.sleep(2)
+
+    #     if latest_thumbnail_id:
+    #         # Собираем чистый URL без параметров
+    #         final_url = f"https://thf.bing.com/th/id/{latest_thumbnail_id}"
+    #         return [final_url]
+    #     else:
+    #         my_log.log_bing_api("bing_genimg_v3:process: Polling finished without finding any thumbnail ID.")
+    #         return []
 
 
     def send_request(self, prompt, model="gpt4o", rt_type=4):
