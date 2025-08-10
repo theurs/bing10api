@@ -140,7 +140,7 @@ class BingBrush:
                     break
                 raise Exception(self.error_message_dict["error_timeout"])
 
-            response = self.session.get(full_polling_url, timeout=self.max_wait_time+60)
+            response = self.session.get(full_polling_url, timeout=self.max_wait_time)
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
 
