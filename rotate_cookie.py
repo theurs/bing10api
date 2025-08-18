@@ -35,14 +35,14 @@ def rotate_cookie(model: str) -> None:
                 f for f in os.listdir('.') 
                 if f.startswith('cookie') and f.endswith('.txt') and os.path.isfile(f)
             ]
-            
+
             # Filter out the destination files managed by this script
             # This set can be expanded if more models are added in bing10api.py
             managed_files = {'cookie_dalle.txt', 'cookie_gpt4o.txt'}
-            
+
             # The source pool is everything except the managed files
             user_provided_cookies = [f for f in all_cookie_files if f not in managed_files]
-            
+
             SOURCE_FILES = natsorted(user_provided_cookies)
             NEXT_COOKIE_INDEX = 0
             if SOURCE_FILES:
@@ -55,7 +55,7 @@ def rotate_cookie(model: str) -> None:
             dest_name = f'cookie_{model}.txt'
 
             my_log.log2(f'rotate_cookie (for model "{model}"): Assigning next cookie from pool.')
-            
+
             # Copy content from source to destination
             with open(source_name, 'r', encoding='utf-8') as source:
                 with open(dest_name, 'w', encoding='utf-8') as target:
@@ -75,15 +75,15 @@ def rotate_cookie(model: str) -> None:
 if __name__ == '__main__':
     # --- Example usage for testing ---
     # To test, create files like: cookie1.txt, cookie2.txt, cookie10.txt
-    
+
     print("1. Assigning cookie for DALLE...")
     rotate_cookie(model='dalle')  # Should pick cookie1.txt
-    
+
     print("\n2. Assigning cookie for GPT-4o...")
     rotate_cookie(model='gpt4o') # Should pick cookie2.txt
-    
+
     print("\n3. Re-assigning cookie for DALLE...")
     rotate_cookie(model='dalle') # Should pick cookie10.txt
-    
+
     print("\n4. Assigning another cookie for GPT-4o...")
     rotate_cookie(model='gpt4o') # Should circle back and pick cookie1.txt again
