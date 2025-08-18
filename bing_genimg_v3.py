@@ -222,7 +222,7 @@ class BingBrush:
                 img_urls = [x for x in raw_urls if 'bing.net/th/id/' in x]
 
 
-            my_log.log_bing_api(f'bing_genimg_v3:process: Success. Got {len(img_urls)} URLs.')
+            my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
             return img_urls
 
         except Exception as unknown_error:
