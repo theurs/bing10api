@@ -77,11 +77,6 @@ class BingBrush:
         session.cookies = self.parse_cookie(cookie)
         return session
 
-    def process_error(self, response: requests.Response) -> Exception:
-        for error_type, error_msg in self.error_message_dict.items():
-            if error_msg in response.text.lower():
-                return Exception(error_type)
-        return Exception("Unknown error occurred during request.")
 
     def request_result_urls(self, response: requests.Response) -> Tuple[Optional[str], Optional[str]]:
         if "Location" not in response.headers:
@@ -167,7 +162,20 @@ class BingBrush:
         my_log.log_bing_api("bing_genimg_v3:obtain_image_urls_gpt: No completed image found within timeout.")
         return []
 
-    def send_request(self, prompt: str, model: str, rt_type: int) -> Tuple[requests.Response, str]:
+    def process_error(self, response: requests.Response) -> Exception:
+        # Сначала проверяем известные текстовые ошибки в теле ответа
+        for error_type, error_msg in self.error_message_dict.items():
+            if error_msg in response.text.lower():
+                return Exception(error_type)
+
+        # Если ни одна из известных ошибок не найдена, формируем детальное сообщение
+        # для последующей записи в лог.
+        error_details = (f"Unknown error occurred during request. "
+                         f"Status Code: {response.status_code}. "
+                         f"Response Body: {response.text}")
+        return Exception(error_details)
+
+    def send_request(self, prompt: str, model: str, rt_type: int) -> Tuple[requests.Response, str, str]:
         model_id = "1" if model == "gpt4o" else "0"
         url_encoded_prompt = requests.utils.quote(prompt)
         payload = f"q={url_encoded_prompt}&qs=ds"
@@ -179,7 +187,7 @@ class BingBrush:
             data=payload,
             timeout=self.max_wait_time,
         )
-        return response, url_encoded_prompt
+        return response, url_encoded_prompt, url
 
     def process(self, prompt: str, model: str = "dalle") -> List[str]:
         """
@@ -187,20 +195,23 @@ class BingBrush:
         model: "dalle" or "gpt4o"
         """
         try:
-            # Try the fast channel first (rt=4)
-            response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=4)
+            # Попытка через быстрый канал (rt=4)
+            response, url_encoded_prompt, request_url = self.send_request(prompt, model=model, rt_type=4)
 
             if response.status_code != 302:
+                my_log.log_bing_api(f'bing_genimg_v3:process: Fast channel (rt=4) request failed. URL: {request_url}')
                 raise self.process_error(response)
 
             my_log.log_bing_api(f'bing_genimg_v3:process: Start "{prompt}" with model "{model}"')
             redirect_url, request_id = self.request_result_urls(response)
 
-            # If boosts have run out (no redirect), try the slow channel (rt=3)
+            # Если закончились бусты (нет редиректа), пробуем медленный канал (rt=3)
             if redirect_url is None:
                 my_log.log_bing_api('bing_genimg_v3:process: Boosts may have run out, trying slow pipeline...')
-                response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=3)
+                response, url_encoded_prompt, request_url = self.send_request(prompt, model=model, rt_type=3)
+
                 if response.status_code != 302:
+                    my_log.log_bing_api(f'bing_genimg_v3:process: Slow channel (rt=3) request also failed. URL: {request_url}')
                     raise self.process_error(response)
 
                 redirect_url, request_id = self.request_result_urls(response)
@@ -208,7 +219,7 @@ class BingBrush:
                     my_log.log_bing_api('bing_genimg_v3:process: Slow pipeline also failed. No redirect.')
                     return []
 
-            # Ensure we have the necessary identifiers
+            # Убеждаемся, что получили необходимые идентификаторы
             if not redirect_url or not request_id:
                  my_log.log_bing_api('bing_genimg_v3:process: Failed to get redirect URL or request ID.')
                  return []
@@ -216,17 +227,15 @@ class BingBrush:
             if model == 'gpt4o':
                 img_urls = self.obtain_image_urls_gpt(redirect_url)
             else:  # dalle
-                # Get raw URLs from the obtaining function
                 raw_urls = self.obtain_image_urls_dalle(redirect_url, request_id, url_encoded_prompt)
-                # Apply the original, correct filter here
                 img_urls = [x for x in raw_urls if 'bing.net/th/id/' in x]
-
 
             my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
             return img_urls
 
         except Exception as unknown_error:
             traceback_error = traceback.format_exc()
+            # Теперь сообщение об ошибке `unknown_error` будет содержать детали ответа
             my_log.log_bing_api(f'bing_genimg_v3:process: ERROR: {unknown_error}\n\n{traceback_error}')
             return []
 
