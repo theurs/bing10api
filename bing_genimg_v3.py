@@ -93,7 +93,7 @@ class BingBrush:
             return None, None
         return redirect_url, request_id
 
-    def obtain_image_urls_dalle(self, redirect_url: str, request_id: str, url_encoded_prompt: str) -> List[str]:
+def obtain_image_urls_dalle(self, redirect_url: str, request_id: str, url_encoded_prompt: str) -> List[str]:
         self.session.get(f"https://www.bing.com{redirect_url}", timeout=self.max_wait_time)
         polling_url = f"https://www.bing.com/images/create/async/results/{request_id}?q={url_encoded_prompt}"
 
@@ -116,9 +116,8 @@ class BingBrush:
         # Normalize URLs by removing query parameters
         normal_image_links = [link.split("?w=")[0] for link in image_links]
 
-        # Filter for valid image URLs and remove duplicates
-        valid_urls = [url for url in set(normal_image_links) if url.startswith("https://th.bing.com/th/id/")]
-        return valid_urls
+        # Return all unique URLs without strict filtering
+        return list(set(normal_image_links))
 
     def obtain_image_urls_gpt(self, redirect_url: str) -> List[str]:
         timeout = self.max_wait_time + 60
@@ -217,7 +216,11 @@ class BingBrush:
             if model == 'gpt4o':
                 img_urls = self.obtain_image_urls_gpt(redirect_url)
             else:  # dalle
-                img_urls = self.obtain_image_urls_dalle(redirect_url, request_id, url_encoded_prompt)
+                # Get raw URLs from the obtaining function
+                raw_urls = self.obtain_image_urls_dalle(redirect_url, request_id, url_encoded_prompt)
+                # Apply the original, correct filter here
+                img_urls = [x for x in raw_urls if 'bing.net/th/id/' in x]
+
 
             my_log.log_bing_api(f'bing_genimg_v3:process: Success. Got {len(img_urls)} URLs.')
             return img_urls
