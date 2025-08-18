@@ -93,7 +93,7 @@ class BingBrush:
             return None, None
         return redirect_url, request_id
 
-def obtain_image_urls_dalle(self, redirect_url: str, request_id: str, url_encoded_prompt: str) -> List[str]:
+    def obtain_image_urls_dalle(self, redirect_url: str, request_id: str, url_encoded_prompt: str) -> List[str]:
         self.session.get(f"https://www.bing.com{redirect_url}", timeout=self.max_wait_time)
         polling_url = f"https://www.bing.com/images/create/async/results/{request_id}?q={url_encoded_prompt}"
 
