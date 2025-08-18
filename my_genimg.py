@@ -1,43 +1,40 @@
-#!/usr/-bin/env python3
+#!/usr/bin/env python3
 
 
 import re
 import time
 import threading
-from typing import List
+
 
 import bing_genimg_v3
 import my_log
 
 
-# Lock to prevent parallel calls to the Bing API
+# попробовать заблокировать параллельные вызовы бинга
 BING_LOCK = threading.Lock()
 
 
-def bing(prompt: str, model: str = 'dalle') -> List[str]:
+def bing(prompt: str, model: str = 'dalle') -> list:
     """
-    Generates images using Bing, ensuring only one request is processed at a time
-    and adding a short delay between requests.
+    Рисует бингом, не больше 1 потока и 20 секунд пауза между запросами
+    Ограничение на размер промпта 950, хз почему
 
-    Assumes the prompt has already been moderated.
-
-    :param prompt: The text prompt for image generation.
-    :param model: The model to use ('dalle' or 'gpt4o').
-    :return: A list of image URLs or an empty list on failure.
+    Предполагается что промпт уже прошел модерацию
     """
+
+    # prompt = prompt[:950] # нельзя больше 950?
+
     try:
         with BING_LOCK:
-            # Pass the prompt and model to the underlying generation function
             images = bing_genimg_v3.gen_images(prompt, model=model)
 
-            # This check for non-URL strings seems specific; keeping it as is.
-            if any(not x.startswith('https://') for x in images):
+            # если нет картинок (есть только ошибки) то сразу вернуть отказ
+            if any([x for x in images if not x.startswith('https://')]):
                 return images
 
-        if isinstance(images, list):
-            # A short pause to avoid overwhelming the service
+        if type(images) == list:
+            # пауза между запросами
             time.sleep(4)
-            # Return unique image URLs
             return list(set(images))
 
     except Exception as error_bing_img:
@@ -46,46 +43,26 @@ def bing(prompt: str, model: str = 'dalle') -> List[str]:
     return []
 
 
-def gen_images_bing_only(prompt: str, iterations: int = 1, model: str = 'dalle') -> List[str]:
-    """
-    High-level function to generate images, with support for multiple iterations.
-
-    :param prompt: The text prompt.
-    :param iterations: The number of times to repeat the generation process.
-    :param model: The model to use ('dalle' or 'gpt4o').
-    :return: A consolidated list of unique image URLs.
-    """
+def gen_images_bing_only(prompt: str, iterations: int = 1, model: str = 'dalle') -> list:
     if iterations == 0:
         iterations = 1
 
-    prompt = prompt.strip()
-    if not prompt:
+    if prompt.strip() == '':
         return []
 
-    # This seems to be a custom syntax for some commands, removing it.
     prompt = re.sub(r'^!+', '', prompt).strip()
 
-    all_images: List[str] = []
+    images = []
 
     for _ in range(iterations):
-        generated_images = bing(prompt, model=model)
-        if generated_images:
-            all_images.extend(generated_images)
+        r = bing(prompt, model=model)
+        if r:
+            images += r
         else:
-            # If any iteration fails, stop the process for this request.
             break
 
-    return list(set(all_images))
+    return images
 
 
 if __name__ == '__main__':
-    # Example for direct testing of this module
-    test_prompt = 'вкусный торт с медом и орехами'
-    print(f"Testing with prompt: '{test_prompt}'")
-    result = gen_images_bing_only(test_prompt)
-    if result:
-        print("Result:")
-        for img_url in result:
-            print(img_url)
-    else:
-        print("No images were generated.")
+    print(gen_images_bing_only('вкусный торт с медом и орехами'))

@@ -2,70 +2,62 @@
 
 import os
 import traceback
-from typing import List
+from typing import Dict, List
 
 from natsort import natsorted
 
 import my_log
 
 
-# The common pool of source cookie files, loaded once
-SOURCE_FILES: List[str] = []
-# Index to keep track of the next cookie to use from the pool
-NEXT_COOKIE_INDEX: int = 0
+# Dictionary to hold lists of cookie files for each model
+MODEL_COOKIE_FILES: Dict[str, List[str]] = {}
 
 
 def rotate_cookie(model: str) -> None:
     """
-    Rotates the cookie for a specific model using a shared, circular pool of cookie files.
+    Finds and rotates cookie files for a specific model.
 
-    It scans for source files (e.g., 'cookie1.txt', 'cookie_user.txt') on the first run.
-    On each call, it assigns the next available cookie from this pool to the requesting model,
-    copying its content to 'cookie_{model}.txt'. The pool is traversed in a circle.
+    It searches for .txt files named like 'cookie_{model}_*.txt',
+    takes the first one from a naturally sorted list, and copies its
+    content to 'cookie_{model}.txt'.
 
-    :param model: The name of the model (e.g., 'dalle', 'gpt4o') requesting a new cookie.
+    If the list for a model becomes empty, it rescans the directory.
+
+    :param model: The name of the model (e.g., 'dalle', 'gpt4o') to rotate cookies for.
     """
-    global SOURCE_FILES, NEXT_COOKIE_INDEX
-
     try:
-        # Initialize the source file pool if it's empty (one-time scan)
-        if not SOURCE_FILES:
-            # Find all files starting with 'cookie' and ending with '.txt'
-            all_cookie_files = [
+        global MODEL_COOKIE_FILES
+
+        # Check if the list for the current model is empty or not yet initialized
+        if not MODEL_COOKIE_FILES.get(model):
+            dest_file_name = f'cookie_{model}.txt'
+            prefix = f'cookie_{model}_'
+            
+            # Scan for cookie files specific to the model
+            found_files = [
                 f for f in os.listdir('.') 
-                if f.startswith('cookie') and f.endswith('.txt') and os.path.isfile(f)
+                if f.startswith(prefix) and f.endswith('.txt') and os.path.isfile(f)
             ]
+            
+            # Store the sorted list in our global dictionary
+            MODEL_COOKIE_FILES[model] = natsorted(found_files)
 
-            # Filter out the destination files managed by this script
-            # This set can be expanded if more models are added in bing10api.py
-            managed_files = {'cookie_dalle.txt', 'cookie_gpt4o.txt'}
-
-            # The source pool is everything except the managed files
-            user_provided_cookies = [f for f in all_cookie_files if f not in managed_files]
-
-            SOURCE_FILES = natsorted(user_provided_cookies)
-            NEXT_COOKIE_INDEX = 0
-            if SOURCE_FILES:
-                my_log.log2(f'rotate_cookie: Found source cookie pool:\n' + '\n'.join(SOURCE_FILES))
-
-        # If we have source files, proceed with rotation
-        if SOURCE_FILES:
-            # Get the next cookie file from the pool in a circular manner
-            source_name = SOURCE_FILES[NEXT_COOKIE_INDEX]
+        # Proceed if we have files for the current model
+        if MODEL_COOKIE_FILES.get(model):
+            # Log the current list of available cookies for this model
+            my_log.log2(f'rotate_cookie ({model}): available files:\n' + '\n'.join(MODEL_COOKIE_FILES[model]))
+            
+            # Take the first file from the list
+            source_name = MODEL_COOKIE_FILES[model].pop(0)
             dest_name = f'cookie_{model}.txt'
-
-            my_log.log2(f'rotate_cookie (for model "{model}"): Assigning next cookie from pool.')
-
+            
             # Copy content from source to destination
             with open(source_name, 'r', encoding='utf-8') as source:
                 with open(dest_name, 'w', encoding='utf-8') as target:
                     target.write(source.read())
-                    my_log.log2(f'rotate_cookie: Copied "{source_name}" -> "{dest_name}"')
-
-            # Move to the next index for the next rotation, wrapping around if necessary
-            NEXT_COOKIE_INDEX = (NEXT_COOKIE_INDEX + 1) % len(SOURCE_FILES)
+                    my_log.log2(f'rotate_cookie ({model}): {source_name} -> {dest_name}')
         else:
-            my_log.log2(f'rotate_cookie (for model "{model}"): No source cookie files found. Please create files like "cookie1.txt", "cookie_abc.txt", etc.')
+            my_log.log2(f'rotate_cookie ({model}): no cookie files found')
 
     except Exception as error:
         traceback_error = traceback.format_exc()
@@ -73,17 +65,9 @@ def rotate_cookie(model: str) -> None:
 
 
 if __name__ == '__main__':
-    # --- Example usage for testing ---
-    # To test, create files like: cookie1.txt, cookie2.txt, cookie10.txt
-
-    print("1. Assigning cookie for DALLE...")
-    rotate_cookie(model='dalle')  # Should pick cookie1.txt
-
-    print("\n2. Assigning cookie for GPT-4o...")
-    rotate_cookie(model='gpt4o') # Should pick cookie2.txt
-
-    print("\n3. Re-assigning cookie for DALLE...")
-    rotate_cookie(model='dalle') # Should pick cookie10.txt
-
-    print("\n4. Assigning another cookie for GPT-4o...")
-    rotate_cookie(model='gpt4o') # Should circle back and pick cookie1.txt again
+    # Example usage for testing
+    # create dummy files like cookie_dalle_1.txt, cookie_dalle_2.txt, cookie_gpt4o_a.txt
+    print("Testing DALLE cookie rotation...")
+    rotate_cookie(model='dalle')
+    print("\nTesting GPT-4o cookie rotation...")
+    rotate_cookie(model='gpt4o')

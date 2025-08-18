@@ -9,12 +9,10 @@ import random
 import time
 import traceback
 from http.cookies import SimpleCookie
-from typing import List, Tuple, Optional, Dict
 
 import regex
 import requests
 from requests.utils import cookiejar_from_dict
-from requests.cookies import RequestsCookieJar
 
 import my_log
 
@@ -22,32 +20,35 @@ import my_log
 class BingBrush:
     def __init__(
         self,
-        cookie: str,
-        verbose: bool = False,
-        max_wait_time: int = 60,
+        cookie,
+        verbose=False,
+        max_wait_time=60,
     ):
         self.max_wait_time = max_wait_time
         self.verbose = verbose
+
         self.session = self.construct_requests_session(cookie)
-        self.error_message_dict = self.prepare_error_messages()
 
-    def parse_cookie(self, cookie_string: str) -> RequestsCookieJar:
-        # Tries to read from a file if the cookie_string is a valid path
-        if os.path.exists(cookie_string):
-            try:
-                with open(cookie_string, 'r', encoding='utf-8') as f:
-                    cookie_string = f.read()
-            except Exception as e:
-                my_log.log_bing_api(f"bing_genimg_v3:parse_cookie: Failed to read cookie file {cookie_string}: {e}")
-                return RequestsCookieJar()  # Return empty jar on failure
+        self.prepare_error_messages()
 
+    def parse_cookie(self, cookie_string):
         cookie = SimpleCookie()
-        cookie.load(cookie_string)
-        cookies_dict = {key: morsel.value for key, morsel in cookie.items()}
-        return cookiejar_from_dict(cookies_dict)
+        if os.path.exists(cookie_string):
+            with open(cookie_string) as f:
+                cookie_string = f.read()
 
-    def prepare_error_messages(self) -> Dict[str, str]:
-        return {
+        cookie.load(cookie_string)
+        cookies_dict = {}
+        cookiejar = None
+        for key, morsel in cookie.items():
+            cookies_dict[key] = morsel.value
+            cookiejar = cookiejar_from_dict(
+                cookies_dict, cookiejar=None, overwrite=True
+            )
+        return cookiejar
+
+    def prepare_error_messages(self):
+        self.error_message_dict = {
             "error_blocked_prompt": "Your prompt has been blocked by Bing. Try to change any bad words and try again.",
             "error_being_reviewed_prompt": "Your prompt is being reviewed by Bing. Try to change any sensitive words and try again.",
             "error_noresults": "Could not get results.",
@@ -58,65 +59,68 @@ class BingBrush:
             "error_no_images": "No images",
         }
 
-    def construct_requests_session(self, cookie: str) -> requests.Session:
-        # Generate random US IP to simulate a different client
-        forwarded_ip = f"100.{random.randint(43, 63)}.{random.randint(128, 255)}.{random.randint(0, 255)}"
-        headers = {
+    def construct_requests_session(self, cookie):
+        # Generate random US IP 
+        FORWARDED_IP = f"100.{random.randint(43, 63)}.{random.randint(128, 255)}.{random.randint(0, 255)}"
+        HEADERS = {
             "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "accept-language": "en-US,en;q=0.9",
             "cache-control": "max-age=0",
             "content-type": "application/x-www-form-urlencoded",
             "referrer": "https://www.bing.com/images/create/",
             "origin": "https://www.bing.com",
+            # "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36 Edg/110.0.1587.63",
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
-            "x-forwarded-for": forwarded_ip,
+            "x-forwarded-for": FORWARDED_IP,
         }
 
         session = requests.Session()
-        session.headers = headers
+        session.headers = HEADERS
         session.cookies = self.parse_cookie(cookie)
         return session
 
+    def process_error(self, response):
+        for error_type, error_msg in self.error_message_dict.items():
+            if error_msg in response.text.lower():
+                return Exception(error_type)
 
-    def request_result_urls(self, response: requests.Response) -> Tuple[Optional[str], Optional[str]]:
+    def request_result_urls(self, response, url_encoded_prompt):
         if "Location" not in response.headers:
             return None, None
         redirect_url = response.headers["Location"].replace("&nfy=1", "")
-        try:
-            request_id = redirect_url.split("id=")[-1]
-        except IndexError:
-            return None, None
+        request_id = redirect_url.split("id=")[-1]
         return redirect_url, request_id
 
-    def obtain_image_urls_dalle(self, redirect_url: str, request_id: str, url_encoded_prompt: str) -> List[str]:
+
+    def obtaion_image_url_dalle(self, redirect_url, request_id, url_encoded_prompt):
         self.session.get(f"https://www.bing.com{redirect_url}", timeout=self.max_wait_time)
         polling_url = f"https://www.bing.com/images/create/async/results/{request_id}?q={url_encoded_prompt}"
-
+        # Poll for results
         start_wait = time.time()
         while True:
             if int(time.time() - start_wait) > self.max_wait_time:
                 raise Exception(self.error_message_dict["error_timeout"])
-
             response = self.session.get(polling_url, timeout=self.max_wait_time)
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
-
-            if not response.text or "errorMessage" in response.text:
+            if not response.text or response.text.find("errorMessage") != -1:
                 time.sleep(1)
                 continue
             else:
                 break
 
         image_links = regex.findall(r'src="([^"]+)"', response.text)
-        # Normalize URLs by removing query parameters
         normal_image_links = [link.split("?w=")[0] for link in image_links]
+        normal_image_links = list(set(normal_image_links))
 
-        # Return all unique URLs without strict filtering
-        return list(set(normal_image_links))
+        return normal_image_links
 
-    def obtain_image_urls_gpt(self, redirect_url: str) -> List[str]:
+    def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
         timeout = self.max_wait_time + 60
-        initial_page_response = self.session.get(f"https://www.bing.com{redirect_url}", timeout=timeout)
+        initial_page_response = self.session.get(
+            f"https://www.bing.com{redirect_url}",
+            timeout=timeout
+        )
         if initial_page_response.status_code != 200:
             raise Exception("Failed to load result page.")
 
@@ -130,58 +134,54 @@ class BingBrush:
         start_wait = time.time()
         latest_thumbnail_id = None
 
-        while time.time() - start_wait < timeout:
+        while True:
+            elapsed = time.time() - start_wait
+            if elapsed > timeout:
+                if latest_thumbnail_id:
+                    break
+                raise Exception(self.error_message_dict["error_timeout"])
+
             response = self.session.get(full_polling_url, timeout=timeout)
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
 
+            # Проверка на блокировку контента
             if "Unsafe image content detected" in response.text:
                 raise Exception("Unsafe image content detected")
 
-            # Check if generation is complete by looking for non-empty rewrite URL
+            # Альтернативная проверка готовности: отсутствие пустого data-rewriteurl
             if 'data-rewriteurl=""' not in response.text:
+                # Теперь парсим JSON-боблы как в оригинале
                 m_json_blobs = regex.findall(r'm="([^"]+)"', response.text)
                 if m_json_blobs:
                     try:
-                        # Process the last JSON blob, as it's the most recent update
                         unescaped_blob = html.unescape(m_json_blobs[-1])
                         m_data = json.loads(unescaped_blob)
                         if "ThumbnailInfo" in m_data and m_data["ThumbnailInfo"]:
                             thumbnail_id = m_data["ThumbnailInfo"][0].get("ThumbnailId")
                             if thumbnail_id:
                                 latest_thumbnail_id = thumbnail_id
-                                break  # Found a complete image, exit the loop
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        pass  # Ignore parsing errors and try again
+                                break
+                    except Exception:
+                        pass
 
             time.sleep(2)
 
         if latest_thumbnail_id:
-            return [f"https://th.bing.com/th/id/{latest_thumbnail_id}"]
+            return [f"https://thf.bing.com/th/id/{latest_thumbnail_id}"]
+        else:
+            my_log.log_bing_api("bing_genimg_v3:process: No completed image found within timeout.")
+            return []
 
-        my_log.log_bing_api("bing_genimg_v3:obtain_image_urls_gpt: No completed image found within timeout.")
-        return []
 
-    def process_error(self, response: requests.Response) -> Exception:
-        # Сначала проверяем известные текстовые ошибки в теле ответа
-        for error_type, error_msg in self.error_message_dict.items():
-            if error_msg in response.text.lower():
-                return Exception(error_type)
-
-        # Если ни одна из известных ошибок не найдена, формируем детальное,
-        # но краткое сообщение для лога.
-
-        # Обрезаем тело ответа до 500 символов, чтобы не засорять логи.
-        response_preview = response.text[:500]
-
-        error_details = (f"Unknown error. Status Code: {response.status_code}. "
-                         f"Response Preview: {response_preview}...")
-        return Exception(error_details)
-
-    def send_request(self, prompt: str, model: str, rt_type: int) -> Tuple[requests.Response, str, str]:
+    def send_request(self, prompt, model="gpt4o", rt_type=4):
+        # Маппинг имени модели на ее ID
         model_id = "1" if model == "gpt4o" else "0"
+
         url_encoded_prompt = requests.utils.quote(prompt)
         payload = f"q={url_encoded_prompt}&qs=ds"
+
+        # Используем model_id вместо имени
         url = f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt={rt_type}&mdl={model_id}&FORM=GENCRE"
 
         response = self.session.post(
@@ -190,90 +190,60 @@ class BingBrush:
             data=payload,
             timeout=self.max_wait_time,
         )
-        return response, url_encoded_prompt, url
+        return response, url_encoded_prompt
 
-    def process(self, prompt: str, model: str = "dalle") -> List[str]:
+    def process(self, prompt, model="dalle"):
         """
-        Main method for generating images.
-        model: "dalle" or "gpt4o"
+        Основной метод для генерации изображений.
+        model: "dalle" или "gpt4o"
         """
         try:
-            # Попытка через быстрый канал (rt=4)
-            response, url_encoded_prompt, request_url = self.send_request(prompt, model=model, rt_type=4)
+            # Сначала пробуем быстрый канал (rt=4)
+            response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=4)
 
             if response.status_code != 302:
-                my_log.log_bing_api(f'bing_genimg_v3:process: Fast channel (rt=4) request failed. URL: {request_url}')
-                raise self.process_error(response)
+                self.process_error(response)
 
-            my_log.log_bing_api(f'bing_genimg_v3:process: Start "{prompt}" with model "{model}"')
-            redirect_url, request_id = self.request_result_urls(response)
+            my_log.log_bing_api(f'bing_genimg_v3:process: {prompt}')
+            redirect_url, request_id = self.request_result_urls(
+                response, url_encoded_prompt
+            )
 
-            # Если закончились бусты (нет редиректа), пробуем медленный канал (rt=3)
+            # Если бусты кончились, пробуем медленный (rt=3)
             if redirect_url is None:
-                my_log.log_bing_api('bing_genimg_v3:process: Boosts may have run out, trying slow pipeline...')
-                response, url_encoded_prompt, request_url = self.send_request(prompt, model=model, rt_type=3)
-
-                if response.status_code != 302:
-                    my_log.log_bing_api(f'bing_genimg_v3:process: Slow channel (rt=3) request also failed. URL: {request_url}')
-                    raise self.process_error(response)
-
-                redirect_url, request_id = self.request_result_urls(response)
+                my_log.log_bing_api('bing_genimg_v3:process: ==> Your boosts have run out, using the slow generating pipeline, please wait...')
+                response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=3)
+                redirect_url, request_id = self.request_result_urls(
+                    response, url_encoded_prompt
+                )
                 if redirect_url is None:
-                    my_log.log_bing_api('bing_genimg_v3:process: Slow pipeline also failed. No redirect.')
+                    my_log.log_bing_api('bing_genimg_v3:process: ==> Error occurs, please submit an issue at https://github.com/vra/bing_brush, I will fix it as soon as possible.')
                     return []
 
-            # Убеждаемся, что получили необходимые идентификаторы
-            if not redirect_url or not request_id:
-                 my_log.log_bing_api('bing_genimg_v3:process: Failed to get redirect URL or request ID.')
-                 return []
-
             if model == 'gpt4o':
-                img_urls = self.obtain_image_urls_gpt(redirect_url)
-            else:  # dalle
-                raw_urls = self.obtain_image_urls_dalle(redirect_url, request_id, url_encoded_prompt)
-                img_urls = [x for x in raw_urls if 'bing.net/th/id/' in x]
-
-            my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
-            return img_urls
+                img_urls = self.obtaion_image_url(redirect_url, request_id, url_encoded_prompt)
+                if len(img_urls) > 1:
+                    img_urls = [x for x in img_urls if x.startswith('http') and 'bing.net/th/id/' in x]
+                my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
+                return img_urls
+            else:
+                img_urls = self.obtaion_image_url_dalle(redirect_url, request_id, url_encoded_prompt)
+                img_urls = [x for x in img_urls if x.startswith('http') and 'bing.net/th/id/' in x]
+                my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
+                return img_urls
+                
 
         except Exception as unknown_error:
             traceback_error = traceback.format_exc()
-            # Теперь сообщение об ошибке `unknown_error` будет содержать детали ответа
-            my_log.log_bing_api(f'bing_genimg_v3:process: ERROR: {unknown_error}\n\n{traceback_error}')
+            my_log.log_bing_api(f'bing_genimg_v3:process: {unknown_error}\n\n{traceback_error}')
             return []
 
 
-def gen_images(prompt: str, model: str = 'dalle') -> List[str]:
-    """
-    Generates images using Bing, selecting the cookie file based on the model.
-    This function is the entry point from my_genimg.py.
-    """
-    # Dynamically determine the cookie file based on the selected model
-    cookie_filename = f'cookie_{model}.txt'
-
-    # Check if the required cookie file exists before proceeding
-    if not os.path.exists(cookie_filename):
-        my_log.log_bing_api(f'bing_genimg_v3:gen_images: Cookie file "{cookie_filename}" not found for model "{model}". The API should create it via rotate_cookie first.')
-        return []
-
-    brush = BingBrush(cookie=cookie_filename)
-    return brush.process(prompt, model=model)
+def gen_images(prompt: str, model: str = 'dalle') -> list:
+    brush = BingBrush(cookie='cookie.txt')
+    r = brush.process(prompt, model=model)
+    return r
 
 
 if __name__ == "__main__":
-    # Example for direct testing of this script
-    # Make sure you have a 'cookie_dalle.txt' or 'cookie_gpt4o.txt' file in the same directory.
-    # These files are created by the rotate_cookie.py script.
-
-    test_prompt = 'A cute cat wearing a small wizard hat'
-    test_model = 'dalle'  # or 'gpt4o'
-
-    print(f"Generating images for prompt: '{test_prompt}' using model: '{test_model}'...")
-    result_urls = gen_images(test_prompt, model=test_model)
-
-    if result_urls:
-        print("Generated Image URLs:")
-        for url in result_urls:
-            print(url)
-    else:
-        print("Failed to generate images. Check logs/debug_bing_api.log for details.")
+    print(gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o'))

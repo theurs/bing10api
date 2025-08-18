@@ -14,63 +14,47 @@ import rotate_cookie
 from utils import async_run, seconds_to_hms
 
 
-# --- State Management Configuration ---
-
-# Max consecutive failures before trying to rotate the cookie for a model
+# сколько раз подряд должно быть фейлов что бы принять меры - сменить куки
 MAX_COOKIE_FAIL = 5
-# Max consecutive failures before suspending the service for a model
+COOKIE_FAIL = 0
+COOKIE_INITIALIZED = False
+# сколько раз подряд должно быть фейлов что бы принять меры - выключить сервис
 MAX_COOKIE_FAIL_FOR_TERMINATE = 20
-# Time in seconds to suspend the service before the next attempt (12 hours)
-SUSPEND_TIME_SET = 12 * 60 * 60
+COOKIE_FAIL_FOR_TERMINATE = 0
+SUSPEND_TIME = 0 # время когда можно снова запустить сервис
+SUSPEND_TIME_SET = 12 * 60 * 60 # время в секундах до следующего запуска сервиса (12 часов)
 
-
-# State management for different models
-MODEL_STATE: Dict[str, Dict[str, Any]] = {
-    'dalle': {
-        "fail_count": 0,
-        "initialized": False,
-        "terminate_fail_count": 0,
-        "suspend_time": 0,
-    },
-    'gpt4o': {
-        "fail_count": 0,
-        "initialized": False,
-        "terminate_fail_count": 0,
-        "suspend_time": 0,
-    }
-}
+# после такого количества запросов принудительно сменить куки
+MAX_REQUESTS_BEFORE_ROTATE_COOKIE = 50
+REQUESTS_BEFORE_ROTATE_COOKIE = 0
 
 
 ## rest api #######################################################################
 
 
-# API for accessing the Bing image generator
+# API для доступа к генератору картинок бинг
 FLASK_APP = Flask(__name__)
 
 
-def bing(j: Dict[str, Any], iterations: int = 1, model: str = 'dalle') -> Any:
+def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any]:
     '''
-    Makes 1 request to Bing for drawing.
-    If it fails, it returns an error.
-    If it fails 5 times in a row, it tries to change the cookies for that model.
-    If it fails 20 times in a row, it disables the service for that model for 12 hours.
+    Делает 1 запрос на рисование бингом.
+    Если не получилось - возвращает ошибку.
+    Если не получилось 5 раз подряд то пытается сменить куки.
+    Если не получилось 20 раз подряд то выключает сервис на 12 часов.
     '''
     try:
-        # Get state for the current model
-        if model not in MODEL_STATE:
-            return jsonify({"error": f"Model '{model}' is not supported"}), 400
-        state = MODEL_STATE[model]
+        global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE, SUSPEND_TIME
+        global REQUESTS_BEFORE_ROTATE_COOKIE
 
-        # Check for service suspension for this model
-        if state["terminate_fail_count"] >= MAX_COOKIE_FAIL_FOR_TERMINATE:
-            if state["suspend_time"] and state["suspend_time"] > time.time():
-                error_msg = f"Service for model '{model}' is disabled, time to next start is {seconds_to_hms(int(state['suspend_time'] - time.time()))}"
-                return jsonify({"error": error_msg}), 500
-            elif state["suspend_time"] == 0:
-                state["suspend_time"] = time.time() + SUSPEND_TIME_SET
-                my_log.log2(f'Suspend service for model {model}: {seconds_to_hms(int(SUSPEND_TIME_SET))}')
+        if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE:
+            if SUSPEND_TIME and SUSPEND_TIME > time.time():
+                return jsonify({"error": "Service is disabled, time to next start is " + seconds_to_hms(int(SUSPEND_TIME - time.time())) + " seconds"}), 500
+            elif SUSPEND_TIME == 0:
+                SUSPEND_TIME = time.time() + SUSPEND_TIME_SET
+                my_log.log2(f'Suspend service: {seconds_to_hms(int(SUSPEND_TIME_SET))}')
 
-                # Check and execute command from cfg.CMD_ON_STOP
+                # Проверку и выполнение команды из cfg.CMD_ON_STOP
                 if hasattr(cfg, 'CMD_ON_STOP') and cfg.CMD_ON_STOP:
                     try:
                         my_log.log2(f'Executing CMD_ON_STOP: {cfg.CMD_ON_STOP}')
@@ -78,19 +62,22 @@ def bing(j: Dict[str, Any], iterations: int = 1, model: str = 'dalle') -> Any:
                     except Exception as cmd_e:
                         my_log.log2(f'Error executing CMD_ON_STOP: {cmd_e}')
 
-                return jsonify({"error": f"Service for model '{model}' is disabled for {seconds_to_hms(int(SUSPEND_TIME_SET))}"}), 500
-            elif state["suspend_time"] and state["suspend_time"] < time.time():
-                my_log.log2(f'Restart service for model {model}')
-                state["suspend_time"] = 0
-                state["terminate_fail_count"] = 0
-                state["fail_count"] = 0
+                return jsonify({"error": "Service is disabled for " + seconds_to_hms(int(SUSPEND_TIME_SET)) + " seconds"}), 500
+            elif SUSPEND_TIME and SUSPEND_TIME < time.time():
+                my_log.log2(f'Restart service')
+                SUSPEND_TIME = 0
+                COOKIE_FAIL_FOR_TERMINATE = 0
+                COOKIE_FAIL = 0
 
-        if not state["initialized"]:
-            rotate_cookie.rotate_cookie(model=model)
-            state["initialized"] = True
+        if not COOKIE_INITIALIZED:
+            rotate_cookie.rotate_cookie()
+            COOKIE_INITIALIZED = True
+
 
         # Get JSON data from the request
         data: Dict[str, Any] = j
+
+        # Extract the prompt from the JSON data
         prompt: str = data.get('prompt', '')
 
         if not prompt:
@@ -100,19 +87,17 @@ def bing(j: Dict[str, Any], iterations: int = 1, model: str = 'dalle') -> Any:
         image_urls: List[str] = my_genimg.gen_images_bing_only(prompt, iterations, model=model)
 
         if not image_urls:
-            state["fail_count"] += 1
-            state["terminate_fail_count"] += 1
+            COOKIE_FAIL += 1
+            COOKIE_FAIL_FOR_TERMINATE += 1
 
-            if state["fail_count"] >= MAX_COOKIE_FAIL:
-                state["fail_count"] = 0
-                my_log.log2(f"Rotating cookie for model '{model}' due to failures.")
-                rotate_cookie.rotate_cookie(model=model)
+            if COOKIE_FAIL >= MAX_COOKIE_FAIL:
+                COOKIE_FAIL = 0
+                rotate_cookie.rotate_cookie()
 
             return jsonify({"error": "No images generated"}), 404
         else:
-            # Reset counters on success
-            state["fail_count"] = 0
-            state["terminate_fail_count"] = 0
+            COOKIE_FAIL = 0
+            COOKIE_FAIL_FOR_TERMINATE = 0
 
         return jsonify({"urls": image_urls}), 200
     except Exception as e:
@@ -120,123 +105,102 @@ def bing(j: Dict[str, Any], iterations: int = 1, model: str = 'dalle') -> Any:
         return jsonify({"error": str(e)}), 500
 
 
-def _reload_model_cookie(model: str) -> Any:
+@FLASK_APP.route('/reload_cookies', methods=['POST'])
+def reload_cookies_api() -> Dict[str, Any]:
     """
-    Helper function to reload cookies and reset state for a specific model.
+    API endpoint for reloading Bing cookies.
 
-    :param model: The name of the model to reload ('dalle', 'gpt4o').
-    :return: A Flask response object.
+    :return: A JSON response indicating success or failure.
     """
-    if model not in MODEL_STATE:
-        return jsonify({"error": f"Model '{model}' not found"}), 404
-
     try:
-        rotate_cookie.rotate_cookie(model=model)
-        state = MODEL_STATE[model]
-        state["fail_count"] = 0
-        state["initialized"] = True
-        state["terminate_fail_count"] = 0
-        state["suspend_time"] = 0
-        my_log.log2(f"Cookies for model '{model}' reloaded successfully via API.")
-        return jsonify({"message": f"Cookies for model '{model}' reloaded successfully"}), 200
+        rotate_cookie.rotate_cookie()
+        global COOKIE_FAIL, COOKIE_INITIALIZED, COOKIE_FAIL_FOR_TERMINATE, REQUESTS_BEFORE_ROTATE_COOKIE
+        COOKIE_FAIL = 0
+        COOKIE_INITIALIZED = True
+        COOKIE_FAIL_FOR_TERMINATE = 0
+        REQUESTS_BEFORE_ROTATE_COOKIE = 0
+        my_log.log2('Cookies reloaded successfully via API.')
+        return jsonify({"message": "Cookies reloaded successfully"}), 200
     except Exception as e:
-        my_log.log_bing_api(f'tb:_reload_model_cookie ({model}): {e}')
+        my_log.log_bing_api(f'tb:reload_cookies_api: {e}')
         return jsonify({"error": str(e)}), 500
 
 
-@FLASK_APP.route('/reload_cookies', methods=['POST'])
-def reload_cookies_api() -> Any:
-    """
-    API endpoint for reloading Bing cookies for all models.
-
-    :return: A JSON response indicating success or failure for all models.
-    """
-    results = {}
-    overall_status_code = 200
-    for model in MODEL_STATE:
-        response_obj = _reload_model_cookie(model)
-        results[model] = response_obj.get_json()
-        if response_obj.status_code != 200:
-            overall_status_code = 500
-
-    return jsonify(results), overall_status_code
-
-
-@FLASK_APP.route('/reload_dalle', methods=['POST'])
-def reload_dalle_api() -> Any:
-    """
-    API endpoint for reloading Bing cookies for the 'dalle' model.
-    """
-    return _reload_model_cookie('dalle')
-
-
-@FLASK_APP.route('/reload_gpt4o', methods=['POST'])
-def reload_gpt4o_api() -> Any:
-    """
-    API endpoint for reloading Bing cookies for the 'gpt4o' model.
-    """
-    return _reload_model_cookie('gpt4o')
-
-
 @FLASK_APP.route('/bing10', methods=['POST'])
-def bing_api_post10() -> Any:
+def bing_api_post10() -> Dict[str, Any]:
     """
-    API endpoint for generating images using Bing (dalle).
+    API endpoint for generating images using Bing.
+
     x10 times bing repeat
+
+    :return: A JSON response containing a list of URLs or an error message.
     """
-    return bing(request.get_json(), 10, model='dalle')
+    return bing(request.get_json(), 10)
 
 
 @FLASK_APP.route('/bing20', methods=['POST'])
-def bing_api_post20() -> Any:
+def bing_api_post20() -> Dict[str, Any]:
     """
-    API endpoint for generating images using Bing (dalle).
+    API endpoint for generating images using Bing.
+
     x20 times bing repeat
+
+    :return: A JSON response containing a list of URLs or an error message.
     """
-    return bing(request.get_json(), 20, model='dalle')
+    return bing(request.get_json(), 20)
 
 
 @FLASK_APP.route('/bing2', methods=['POST'])
-def bing_api_post2() -> Any:
+def bing_api_post2() -> Dict[str, Any]:
     """
-    API endpoint for generating images using Bing (dalle).
+    API endpoint for generating images using Bing.
+
     x2 times bing repeat
+
+    :return: A JSON response containing a list of URLs or an error message.
     """
-    return bing(request.get_json(), 2, model='dalle')
+    return bing(request.get_json(), 2)
 
 
 @FLASK_APP.route('/bing', methods=['POST'])
-def bing_api_post() -> Any:
+def bing_api_post() -> Dict[str, Any]:
     """
-    API endpoint for generating images using Bing (dalle).
+    API endpoint for generating images using Bing.
+
+    :return: A JSON response containing a list of URLs or an error message.
     """
-    return bing(request.get_json(), 1, model='dalle')
+    return bing(request.get_json(), 1)
 
 
 @FLASK_APP.route('/bing_gpt', methods=['POST'])
-def bing_api_post_gpt() -> Any:
+def bing_api_post_gpt() -> Dict[str, Any]:
     """
     API endpoint for generating images using Bing with gpt.
+
+    :return: A JSON response containing a list of URLs or an error message.
     """
     return bing(request.get_json(), 1, model='gpt4o')
 
 
 @async_run
-def run_flask(addr: str = '127.0.0.1', port: int = 58796) -> None:
-    """
-    Starts the Flask web server.
-    """
+def run_flask(addr: str ='127.0.0.1', port: int = 58796):
     try:
-        FLASK_APP.run(debug=False, use_reloader=False, host=addr, port=port)
+        FLASK_APP.run(debug=False, use_reloader=False, host=addr, port = port)
     except Exception as error:
-        my_log.log_sbing_api(f'tb:run_flask: {error}')
+        my_log.log_bing_api(f'tb:run_flask: {error}')
 
 
-## main ###########################################################################
+## rest api #######################################################################
 
 
 if __name__ == '__main__':
     run_flask(addr=cfg.ADDR, port=cfg.PORT)
     my_log.log2(f'run_flask: {cfg.ADDR}:{cfg.PORT} started')
-    while True:
+    while 1:
         time.sleep(1)
+
+
+
+# curl -X POST   -H "Content-Type: application/json"   -d '{
+#     "prompt": "a beautiful landscape"
+#   }'   http://172.28.1.6:58796/bing2
