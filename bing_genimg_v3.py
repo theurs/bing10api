@@ -168,11 +168,14 @@ class BingBrush:
             if error_msg in response.text.lower():
                 return Exception(error_type)
 
-        # Если ни одна из известных ошибок не найдена, формируем детальное сообщение
-        # для последующей записи в лог.
-        error_details = (f"Unknown error occurred during request. "
-                         f"Status Code: {response.status_code}. "
-                         f"Response Body: {response.text}")
+        # Если ни одна из известных ошибок не найдена, формируем детальное,
+        # но краткое сообщение для лога.
+
+        # Обрезаем тело ответа до 500 символов, чтобы не засорять логи.
+        response_preview = response.text[:500]
+
+        error_details = (f"Unknown error. Status Code: {response.status_code}. "
+                         f"Response Preview: {response_preview}...")
         return Exception(error_details)
 
     def send_request(self, prompt: str, model: str, rt_type: int) -> Tuple[requests.Response, str, str]:
