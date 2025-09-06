@@ -116,63 +116,40 @@ class BingBrush:
         return normal_image_links
 
 
-    def obtaion_image_url(self, redirect_url, request_id, url_encoded_prompt):
-        timeout = self.max_wait_time + 60
-        initial_page_response = self.session.get(
-            f"https://www.bing.com{redirect_url}",
-            timeout=timeout
+    def obtaion_image_url(
+        self, redirect_url: str, request_id: str, url_encoded_prompt: str
+    ) -> list[str]:
+        """
+        Polls for image generation results and returns the image URLs.
+        This method is now unified and works similarly to the DALL-E polling.
+        """
+        polling_url = (
+            f"https://www.bing.com/images/create/async/results/{request_id}"
+            f"?q={url_encoded_prompt}"
         )
-        if initial_page_response.status_code != 200:
-            raise Exception("Failed to load result page.")
-
-        polling_url_match = regex.search(r'data-c="([^"]+)"', initial_page_response.text)
-        if not polling_url_match:
-            raise Exception("Could not find polling URL (data-c attribute).")
-
-        polling_url = html.unescape(polling_url_match.group(1))
-        full_polling_url = f"https://www.bing.com{polling_url}"
 
         start_wait = time.time()
-        latest_thumbnail_id = None
-
         while True:
-            elapsed = time.time() - start_wait
-            if elapsed > timeout:
-                if latest_thumbnail_id:
-                    break
+            if int(time.time() - start_wait) > self.max_wait_time:
                 raise Exception(self.error_message_dict["error_timeout"])
 
-            response = self.session.get(full_polling_url, timeout=timeout)
+            response = self.session.get(polling_url, timeout=self.max_wait_time)
+
             if response.status_code != 200:
                 raise Exception(self.error_message_dict["error_noresults"])
 
-            # Проверка на блокировку контента
-            if "Unsafe image content detected" in response.text:
-                raise Exception("Unsafe image content detected")
+            # The 'strm' class indicates that the image is still being rendered progressively.
+            # We wait until this class is no longer present in the response.
+            if "strm" in response.text or not response.text:
+                time.sleep(1)
+                continue
+            else:
+                break
 
-            # Альтернативная проверка готовности: отсутствие пустого data-rewriteurl
-            if 'data-rewriteurl=""' not in response.text:
-                # Теперь парсим JSON-боблы как в оригинале
-                m_json_blobs = regex.findall(r'm="([^"]+)"', response.text)
-                if m_json_blobs:
-                    try:
-                        unescaped_blob = html.unescape(m_json_blobs[-1])
-                        m_data = json.loads(unescaped_blob)
-                        if "ThumbnailInfo" in m_data and m_data["ThumbnailInfo"]:
-                            thumbnail_id = m_data["ThumbnailInfo"][0].get("ThumbnailId")
-                            if thumbnail_id:
-                                latest_thumbnail_id = thumbnail_id
-                                break
-                    except Exception:
-                        pass
+        image_links = regex.findall(r'src="([^"]+)"', response.text)
+        normal_image_links = [link.split("?w=")[0] for link in image_links]
 
-            time.sleep(2)
-
-        if latest_thumbnail_id:
-            return [f"https://thf.bing.com/th/id/{latest_thumbnail_id}"]
-        else:
-            my_log.log_bing_api("bing_genimg_v3:process: No completed image found within timeout.")
-            return []
+        return list(set(normal_image_links))
 
 
     def send_request(self, prompt, model="gpt4o", rt_type=4):
@@ -232,7 +209,7 @@ class BingBrush:
                 img_urls = [x for x in img_urls if x.startswith('http') and 'bing.net/th/id/' in x or 'bing.com/th/id/' in x]
                 my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
                 return img_urls
-                
+
 
         except Exception as unknown_error:
             traceback_error = traceback.format_exc()
@@ -247,5 +224,5 @@ def gen_images(prompt: str, model: str = 'dalle') -> list:
 
 
 if __name__ == "__main__":
-    # print(gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o'))
-    print(gen_images('кепка, на кепке написано кирилицей - Удача', model='dalle'))
+    print(gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o'))
+    # print(gen_images('кепка, на кепке написано кирилицей - Удача', model='dalle'))
