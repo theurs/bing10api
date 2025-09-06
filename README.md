@@ -107,10 +107,10 @@ PORT = '58796'
 ```json
 {
     "urls": [
-        "https://....bing.net/th/id/....jpg",
-        "https://....bing.net/th/id/....jpg",
-        "https://....bing.net/th/id/....jpg",
-        "https://....bing.net/th/id/....jpg"
+        "https://....bing.com/th/id/....jpg",
+        "https://....bing.com/th/id/....jpg",
+        "https://....bing.com/th/id/....jpg",
+        "https://....bing.com/th/id/....jpg"
     ]
 }
 ```
