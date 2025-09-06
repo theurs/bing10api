@@ -128,6 +128,9 @@ class BingBrush:
             f"?q={url_encoded_prompt}"
         )
 
+
+        self.max_wait_time = 240 # 4 минуты принудительно
+
         start_wait = time.time()
         while True:
             if int(time.time() - start_wait) > self.max_wait_time:
