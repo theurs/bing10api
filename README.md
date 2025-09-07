@@ -119,7 +119,8 @@ python bing10api.py
 ```json
 {
     "error": "No images generated"
-}```
+}
+```
 
 #### Пример запроса с `curl`
 
