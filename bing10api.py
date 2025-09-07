@@ -35,7 +35,7 @@ REQUESTS_BEFORE_ROTATE_COOKIE = 0
 def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: int = 10) -> list[dict[str, str]]:
     """
     Parses the log file to get the status of the last N attempts.
-    Robust version that handles multi-line log entries.
+    Final, block-based parsing version for reliability.
     """
     if not os.path.exists(log_file):
         return [{"time": "N/A", "status": "LOG NOT FOUND"}]
@@ -43,39 +43,38 @@ def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: i
     attempts = []
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+            content = f.read()
     except Exception:
         return [{"time": "N/A", "status": "LOG READ ERROR"}]
 
-    # Pre-find all lines that are timestamps to make searching faster
-    timestamp_indices = {i for i, line in enumerate(lines) if re.match(r'^\d{2}-\d{2}-\d{4}', line)}
+    # Split the log into entries based on the separator
+    log_entries = content.strip().split('=' * 80)
 
-    for i in range(len(lines) - 1, -1, -1):
+    # Iterate backwards through the entries (from newest to oldest)
+    for entry in reversed(log_entries):
         if len(attempts) >= num_attempts:
             break
 
-        line = lines[i].strip()
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        lines = entry.split('\n')
+        timestamp = lines[0].strip()
+        message = "\n".join(lines[2:]) # The message starts from the 3rd line
 
         status = None
-        # Success markers
-        if 'bing_genimg_v3:process: [' in line and "http" in line:
+        # Success marker
+        if 'bing_genimg_v3:process: [' in message and 'http' in message:
             status = "OK"
         # Failure markers
-        elif ('bing_genimg_v3:process: []' in line or
-              '==> Error occurs' in line or
-              '"error": "No images generated"' in line):
+        elif ('bing_genimg_v3:process: []' in message or
+              '==> Error occurs' in message or
+              'Traceback (most recent call last):' in message or
+              'Exception:' in message):
             status = "FAIL"
-        # Generic traceback error marker
-        elif 'Traceback (most recent call last):' in line or 'tb:' in line:
-            status = "ERROR"
 
         if status:
-            # Find the timestamp associated with this event by looking backwards
-            timestamp = "N/A"
-            for ts_index in range(i, -1, -1):
-                if ts_index in timestamp_indices:
-                    timestamp = lines[ts_index].strip()
-                    break
             attempts.append({"time": timestamp, "status": status})
 
     return attempts
