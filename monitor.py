@@ -1,7 +1,7 @@
 # monitor.py
 import time
 from collections import deque
-from typing import Any, Dict, Deque, List
+from typing import Any, Deque, Dict, List, Tuple
 
 import cfg  # Import config file
 import requests
@@ -9,6 +9,7 @@ from icmplib import ping
 from icmplib.exceptions import ICMPLibError
 from rich.console import Console, Group
 from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
 
 # Take instance URLs from the config file
@@ -45,8 +46,10 @@ def ping_host(host: str, timeout: int = 2, count: int = 1) -> Dict[str, Any]:
         return {"status": "offline", "error": str(e)}
 
 
-def generate_table() -> Table:
-    """Generates a Rich Table with data from all instances."""
+def generate_table() -> Tuple[Table, List[Dict[str, str]]]:
+    """
+    Generates a Rich Table with data from all instances and collects failed prompts.
+    """
     table = Table(title="[bold cyan]Bing API Instances Status[/bold cyan]")
     table.add_column("Instance", style="cyan", no_wrap=True)
     table.add_column("Status", style="white")
@@ -54,6 +57,8 @@ def generate_table() -> Table:
     table.add_column("Fails", style="magenta")
     table.add_column("Total Fails", style="red")
     table.add_column("Last 10 Attempts", style="green")
+
+    all_failed_prompts: List[Dict[str, str]] = []
 
     for instance in INSTANCES:
         data = get_status(instance["url"])
@@ -91,7 +96,21 @@ def generate_table() -> Table:
             f"{data.get('total_fail_count', 'N/A')}/{data.get('max_fail_for_suspend', 'N/A')}",
             attempts,
         )
-    return table
+
+        # Collect failed prompts
+        failed_prompts = data.get("last_failed_prompts", [])
+        for prompt in failed_prompts:
+            all_failed_prompts.append({"instance": instance["name"], "prompt": prompt})
+
+    # Return unique prompts, preserving order of first appearance
+    unique_prompts = []
+    seen_prompts = set()
+    for item in all_failed_prompts:
+        if item["prompt"] not in seen_prompts:
+            unique_prompts.append(item)
+            seen_prompts.add(item["prompt"])
+
+    return table, unique_prompts
 
 
 def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Table:
@@ -146,6 +165,25 @@ def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Tab
     return table
 
 
+def generate_failed_prompts_panel(prompts: List[Dict[str, str]], width: int) -> Panel:
+    """Creates a Rich Panel to display the last failed prompts."""
+    # Reserve some space for panel borders and padding
+    max_prompt_len = width - 15
+    content = []
+    for item in prompts:
+        instance_name = f"([yellow]{item['instance']}[/yellow])"
+        prompt_text = item['prompt'].replace('\n', ' ')
+        if len(prompt_text) > max_prompt_len:
+            prompt_text = prompt_text[:max_prompt_len] + "..."
+        content.append(f"{instance_name}: {prompt_text}")
+
+    return Panel(
+        "\n".join(content),
+        title="[bold red]Last Failed Prompts[/bold red]",
+        border_style="red",
+    )
+
+
 if __name__ == "__main__":
     console = Console()
 
@@ -159,12 +197,21 @@ if __name__ == "__main__":
     # --- End of dynamic deque logic ---
 
     def generate_layout() -> Group:
-        """Generates the complete layout with all tables."""
-        api_table = generate_table()
+        """Generates the complete layout with all tables and panels."""
+        api_table, failed_prompts = generate_table()
+
+        elements = [api_table]
+
         if ping_enabled:
             ping_table = generate_ping_table(cfg.PING_TARGET, ping_history)
-            return Group(api_table, ping_table)
-        return Group(api_table)
+            elements.append(ping_table)
+
+        if failed_prompts:
+            # Pass console width to handle prompt truncation
+            prompts_panel = generate_failed_prompts_panel(failed_prompts, console.width)
+            elements.append(prompts_panel)
+
+        return Group(*elements)
 
     with Live(generate_layout(), screen=True, auto_refresh=False) as live:
         while True:
@@ -172,6 +219,11 @@ if __name__ == "__main__":
                 if ping_enabled:
                     result = ping_host(cfg.PING_TARGET)
                     ping_history.append(result)
+
+                # Dynamically adjust sparkline width if terminal is resized
+                new_sparkline_width = max(10, console.width - 55)
+                if new_sparkline_width != ping_history.maxlen:
+                    ping_history = deque(ping_history, maxlen=new_sparkline_width)
 
                 live.update(generate_layout(), refresh=True)
                 time.sleep(2)  # Refresh rate

@@ -4,18 +4,17 @@ import os
 import re
 import subprocess
 import time
-import traceback 
+import traceback
+from collections import deque
+from typing import Any, Deque, Dict, List
 
-from flask import Flask, request, jsonify
-from typing import Any, Dict, List
+from flask import Flask, jsonify, request
 
-import cfg
+import cfg  # type: ignore
 import my_genimg
 import my_log
-
 import rotate_cookie
 from utils import async_run, seconds_to_hms
-
 
 # сколько раз подряд должно быть фейлов что бы принять меры - сменить куки
 MAX_COOKIE_FAIL = 5
@@ -24,12 +23,15 @@ COOKIE_INITIALIZED = False
 # сколько раз подряд должно быть фейлов что бы принять меры - выключить сервис
 MAX_COOKIE_FAIL_FOR_TERMINATE = 20
 COOKIE_FAIL_FOR_TERMINATE = 0
-SUSPEND_TIME = 0 # время когда можно снова запустить сервис
-SUSPEND_TIME_SET = 12 * 60 * 60 # время в секундах до следующего запуска сервиса (12 часов)
+SUSPEND_TIME = 0  # время когда можно снова запустить сервис
+SUSPEND_TIME_SET = 12 * 60 * 60  # время в секундах до следующего запуска сервиса (12 часов)
 
 # после такого количества запросов принудительно сменить куки
 MAX_REQUESTS_BEFORE_ROTATE_COOKIE = 50
 REQUESTS_BEFORE_ROTATE_COOKIE = 0
+
+# Global deque to store the last 5 failed prompts
+FAILED_PROMPTS: Deque[str] = deque(maxlen=5)
 
 
 def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: int = 10) -> list[dict[str, str]]:
@@ -61,7 +63,7 @@ def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: i
 
         lines = entry.split('\n')
         timestamp = lines[0].strip()
-        message = "\n".join(lines[2:]) # The message starts from the 3rd line
+        message = "\n".join(lines[2:])  # The message starts from the 3rd line
 
         status = None
         # Success marker
@@ -102,14 +104,14 @@ def get_current_cookie(log_file: str = 'logs/debug.log') -> str:
     return last_cookie_line
 
 
-## rest api #######################################################################
+# rest api #######################################################################
 
 
 # API для доступа к генератору картинок бинг
 FLASK_APP = Flask(__name__)
 
 
-def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any]:
+def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Any:
     '''
     Делает 1 запрос на рисование бингом.
     Если не получилось - возвращает ошибку.
@@ -137,7 +139,7 @@ def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any
 
                 return jsonify({"error": "Service is disabled for " + seconds_to_hms(int(SUSPEND_TIME_SET)) + " seconds"}), 500
             elif SUSPEND_TIME and SUSPEND_TIME < time.time():
-                my_log.log2(f'Restart service')
+                my_log.log2('Restart service')
                 SUSPEND_TIME = 0
                 COOKIE_FAIL_FOR_TERMINATE = 0
                 COOKIE_FAIL = 0
@@ -145,7 +147,6 @@ def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any
         if not COOKIE_INITIALIZED:
             rotate_cookie.rotate_cookie()
             COOKIE_INITIALIZED = True
-
 
         # # принудительно сменить куки после определенного количества запросов
         # if REQUESTS_BEFORE_ROTATE_COOKIE > MAX_REQUESTS_BEFORE_ROTATE_COOKIE:
@@ -156,7 +157,6 @@ def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any
         #     my_log.log2(f'rotate_cookie: after {MAX_REQUESTS_BEFORE_ROTATE_COOKIE} requests')
         # else:
         #     REQUESTS_BEFORE_ROTATE_COOKIE += 1
-
 
         # Get JSON data from the request
         data: Dict[str, Any] = j
@@ -173,6 +173,8 @@ def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any
         if not image_urls:
             COOKIE_FAIL += 1
             COOKIE_FAIL_FOR_TERMINATE += 1
+            # Add the failed prompt to our deque
+            FAILED_PROMPTS.appendleft(prompt)
 
             if COOKIE_FAIL >= MAX_COOKIE_FAIL:
                 COOKIE_FAIL = 0
@@ -190,7 +192,7 @@ def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Dict[str, Any
 
 
 @FLASK_APP.route('/reload_cookies', methods=['POST'])
-def reload_cookies_api() -> Dict[str, Any]:
+def reload_cookies_api() -> Any:
     """
     API endpoint for reloading Bing cookies.
 
@@ -211,7 +213,7 @@ def reload_cookies_api() -> Dict[str, Any]:
 
 
 @FLASK_APP.route('/bing10', methods=['POST'])
-def bing_api_post10() -> Dict[str, Any]:
+def bing_api_post10() -> Any:
     """
     API endpoint for generating images using Bing.
 
@@ -223,7 +225,7 @@ def bing_api_post10() -> Dict[str, Any]:
 
 
 @FLASK_APP.route('/bing20', methods=['POST'])
-def bing_api_post20() -> Dict[str, Any]:
+def bing_api_post20() -> Any:
     """
     API endpoint for generating images using Bing.
 
@@ -235,7 +237,7 @@ def bing_api_post20() -> Dict[str, Any]:
 
 
 @FLASK_APP.route('/bing2', methods=['POST'])
-def bing_api_post2() -> Dict[str, Any]:
+def bing_api_post2() -> Any:
     """
     API endpoint for generating images using Bing.
 
@@ -247,7 +249,7 @@ def bing_api_post2() -> Dict[str, Any]:
 
 
 @FLASK_APP.route('/bing', methods=['POST'])
-def bing_api_post() -> Dict[str, Any]:
+def bing_api_post() -> Any:
     """
     API endpoint for generating images using Bing.
 
@@ -257,7 +259,7 @@ def bing_api_post() -> Dict[str, Any]:
 
 
 @FLASK_APP.route('/bing_gpt', methods=['POST'])
-def bing_api_post_gpt() -> Dict[str, Any]:
+def bing_api_post_gpt() -> Any:
     """
     API endpoint for generating images using Bing with gpt.
 
@@ -267,7 +269,7 @@ def bing_api_post_gpt() -> Dict[str, Any]:
 
 
 @FLASK_APP.route('/status', methods=['GET'])
-def status_api() -> Dict[str, Any]:
+def status_api() -> Any:
     """
     API endpoint for getting the current status of the service.
     Now with error handling.
@@ -282,6 +284,7 @@ def status_api() -> Dict[str, Any]:
             "requests_before_rotate": f"{REQUESTS_BEFORE_ROTATE_COOKIE}/{MAX_REQUESTS_BEFORE_ROTATE_COOKIE}",
             "current_cookie": get_current_cookie(),
             "last_attempts": get_last_attempts(),
+            "last_failed_prompts": list(FAILED_PROMPTS),
         }
 
         if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE and SUSPEND_TIME > time.time():
@@ -296,14 +299,14 @@ def status_api() -> Dict[str, Any]:
 
 
 @async_run
-def run_flask(addr: str ='127.0.0.1', port: int = 58796):
+def run_flask(addr: str = '127.0.0.1', port: int = 58796):
     try:
-        FLASK_APP.run(debug=False, use_reloader=False, host=addr, port = port)
+        FLASK_APP.run(debug=False, use_reloader=False, host=addr, port=port)
     except Exception as error:
         my_log.log_bing_api(f'tb:run_flask: {error}')
 
 
-## rest api #######################################################################
+# rest api #######################################################################
 
 
 if __name__ == '__main__':
@@ -311,8 +314,6 @@ if __name__ == '__main__':
     my_log.log2(f'run_flask: {cfg.ADDR}:{cfg.PORT} started')
     while 1:
         time.sleep(1)
-
-
 
 # curl -X POST   -H "Content-Type: application/json"   -d '{
 #     "prompt": "a beautiful landscape"
