@@ -7,8 +7,7 @@ import cfg  # Import config file
 import requests
 from icmplib import ping
 from icmplib.exceptions import ICMPLibError
-from rich.console import Console
-from rich.console import Group
+from rich.console import Console, Group
 from rich.live import Live
 from rich.table import Table
 
@@ -29,13 +28,14 @@ def get_status(url: str) -> Dict[str, Any]:
 def ping_host(host: str, timeout: int = 2, count: int = 1) -> Dict[str, Any]:
     """
     Pings a host using ICMP packets via the icmplib library.
-    This requires privileged access.
+    This requires privileged access (run with sudo or use setcap).
     """
     try:
-        # This MUST be True to work on your system, as proven by the test.
+        # This MUST be True to work on your system, as proven by testing.
         result = ping(host, count=count, timeout=timeout, privileged=True)
 
         if result.is_alive:
+            # result.avg_rtt is in milliseconds
             return {"status": "online", "latency": result.avg_rtt}
         else:
             return {"status": "offline", "error": "Host unreachable"}
@@ -95,12 +95,18 @@ def generate_table() -> Table:
 
 
 def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Table:
-    """Generates a Rich Table for ping status."""
+    """Generates a Rich Table for ping status with a latency sparkline."""
+    # Characters from low to high latency
+    SPARKLINE_CHARS = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+    # We'll scale latency up to this value. Anything higher gets the max block.
+    MAX_LATENCY_FOR_SCALE = 500  # ms
+
     table = Table(title="[bold cyan]Ping Status[/bold cyan]")
     table.add_column("Target", style="cyan", no_wrap=True)
     table.add_column("Status", style="white")
     table.add_column("Latency (ms)", style="yellow")
-    table.add_column("Last 20 Pings", style="green")
+    # The column must not wrap lines to keep the sparkline intact
+    table.add_column("Latency History", style="green", no_wrap=True)
 
     if not history:
         table.add_row(ping_target, "[yellow]INITIALIZING...[/yellow]", "N/A", "")
@@ -108,25 +114,35 @@ def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Tab
 
     last_result = history[-1]
     status = last_result.get("status", "unknown")
-
-    # Status color coding
     status_str = (
         f"[bold green]ONLINE[/bold green]"
         if status == "online"
         else f"[bold red]OFFLINE[/bold red]"
     )
 
-    # Latency
     latency = last_result.get("latency")
     latency_str = f"{latency:.2f}" if latency is not None else "N/A"
 
-    # History visualization
-    attempts = "".join(
-        "[green]■[/green]" if attempt.get("status") == "online" else "[red]■[/red]"
-        for attempt in history
-    )
+    # --- Sparkline generation logic ---
+    bars = []
+    for attempt in history:
+        if attempt.get("status") == "online":
+            ping_ms = attempt.get("latency", 0)
+            # Clamp latency to our max scale value
+            clamped_ping = min(ping_ms, MAX_LATENCY_FOR_SCALE)
+            # Calculate index for the character list
+            index = int(
+                (clamped_ping / MAX_LATENCY_FOR_SCALE) * (len(SPARKLINE_CHARS) - 1)
+            )
+            char = SPARKLINE_CHARS[index]
+            bars.append(f"[green]{char}[/green]")
+        else:
+            # A full, red block for failures
+            bars.append(f"[red]█[/red]")
+    sparkline = "".join(bars)
+    # --- End of sparkline logic ---
 
-    table.add_row(ping_target, status_str, latency_str, attempts)
+    table.add_row(ping_target, status_str, latency_str, sparkline)
     return table
 
 
@@ -135,7 +151,12 @@ if __name__ == "__main__":
 
     # Check if ping target is configured
     ping_enabled = hasattr(cfg, "PING_TARGET") and cfg.PING_TARGET
-    ping_history: Deque[Dict[str, Any]] = deque(maxlen=20)
+
+    # --- Dynamic deque size based on terminal width ---
+    # Reserve ~55 characters for other columns, borders, and padding
+    sparkline_width = max(10, console.width - 55)
+    ping_history: Deque[Dict[str, Any]] = deque(maxlen=sparkline_width)
+    # --- End of dynamic deque logic ---
 
     def generate_layout() -> Group:
         """Generates the complete layout with all tables."""
