@@ -29,28 +29,19 @@ def get_status(url: str) -> Dict[str, Any]:
 def ping_host(host: str, timeout: int = 2, count: int = 1) -> Dict[str, Any]:
     """
     Pings a host using ICMP packets via the icmplib library.
-    This can often run without administrative privileges.
-
-    Args:
-        host: The hostname or IP address to ping.
-        timeout: The timeout in seconds.
-        count: The number of packets to send.
-
-    Returns:
-        A dictionary with the ping result.
+    This requires privileged access.
     """
     try:
-        # privileged=False allows running without root
-        result = ping(host, count=count, timeout=timeout, privileged=False)
+        # This MUST be True to work on your system, as proven by the test.
+        result = ping(host, count=count, timeout=timeout, privileged=True)
 
         if result.is_alive:
-            # result.avg_rtt is in milliseconds
             return {"status": "online", "latency": result.avg_rtt}
         else:
             return {"status": "offline", "error": "Host unreachable"}
 
-    except ICMPLibError as e:
-        # Catch library-specific errors, like name resolution failure
+    except (ICMPLibError, PermissionError) as e:
+        # Catch permission errors if not run with sudo/setcap
         return {"status": "offline", "error": str(e)}
 
 
