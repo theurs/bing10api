@@ -171,7 +171,8 @@ def generate_failed_prompts_panel(prompts: List[Dict[str, str]], width: int) -> 
     # max_prompt_len = width - 15
     max_prompt_len = 400
     content = []
-    for item in prompts:
+    # Ограничиваем количество промптов до 5
+    for item in prompts[:5]:
         instance_name = f"([yellow]{item['instance']}[/yellow])"
         prompt_text = item['prompt'].replace('\n', ' ')
         if len(prompt_text) > max_prompt_len:
