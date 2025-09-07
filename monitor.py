@@ -8,7 +8,7 @@ import requests
 from icmplib import ping
 from icmplib.exceptions import ICMPLibError
 from rich.console import Console
-from rich.layout import Group
+from rich.console import Group
 from rich.live import Live
 from rich.table import Table
 
