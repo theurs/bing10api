@@ -32,6 +32,7 @@ REQUESTS_BEFORE_ROTATE_COOKIE = 0
 def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: int = 10) -> list[dict[str, str]]:
     """
     Parses the log file to get the status of the last N attempts.
+    More robust version.
     """
     if not os.path.exists(log_file):
         return [{"time": "N/A", "status": "LOG NOT FOUND"}]
@@ -47,19 +48,32 @@ def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: i
     for i in range(len(lines) - 1, -1, -1):
         if len(attempts) >= num_attempts:
             break
+        
         line = lines[i].strip()
-        # Success marker
-        if 'bing_genimg_v3:process: [' in line and "http" in line:
+        
+        try:
+            # Check if the line index is valid before accessing previous lines
+            if i < 2:
+                continue
+
             timestamp = lines[i-2].strip()
-            attempts.append({"time": timestamp, "status": "OK"})
-        # Known failure marker
-        elif '"error": "No images generated"' in line:
-            timestamp = lines[i-2].strip()
-            attempts.append({"time": timestamp, "status": "FAIL"})
-        # Generic error marker
-        elif 'tb:' in line:
-            timestamp = lines[i-2].strip()
-            attempts.append({"time": timestamp, "status": "ERROR"})
+
+            # Success marker
+            if 'bing_genimg_v3:process: [' in line and "http" in line:
+                attempts.append({"time": timestamp, "status": "OK"})
+            # Known failure marker
+            elif '"error": "No images generated"' in line:
+                attempts.append({"time": timestamp, "status": "FAIL"})
+            # Generic error marker
+            elif 'tb:' in line:
+                attempts.append({"time": timestamp, "status": "ERROR"})
+        except IndexError:
+            # This will catch cases where log format is unexpected
+            # and there are not enough lines before the current one.
+            continue
+        except Exception:
+            # Catch any other unexpected parsing error for a line
+            attempts.append({"time": "PARSE_ERROR", "status": "ERROR"})
 
     return attempts
 
