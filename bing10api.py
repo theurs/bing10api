@@ -2,6 +2,7 @@
 
 import subprocess
 import time
+import traceback 
 
 from flask import Flask, request, jsonify
 from typing import Any, Dict, List
@@ -32,7 +33,7 @@ REQUESTS_BEFORE_ROTATE_COOKIE = 0
 def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: int = 10) -> list[dict[str, str]]:
     """
     Parses the log file to get the status of the last N attempts.
-    More robust version.
+    Robust version that handles multi-line log entries.
     """
     if not os.path.exists(log_file):
         return [{"time": "N/A", "status": "LOG NOT FOUND"}]
@@ -44,36 +45,36 @@ def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: i
     except Exception:
         return [{"time": "N/A", "status": "LOG READ ERROR"}]
 
-    # Search backwards for attempt markers
+    # Pre-find all lines that are timestamps to make searching faster
+    timestamp_indices = {i for i, line in enumerate(lines) if re.match(r'^\d{2}-\d{2}-\d{4}', line)}
+
     for i in range(len(lines) - 1, -1, -1):
         if len(attempts) >= num_attempts:
             break
-        
+
         line = lines[i].strip()
-        
-        try:
-            # Check if the line index is valid before accessing previous lines
-            if i < 2:
-                continue
 
-            timestamp = lines[i-2].strip()
+        status = None
+        # Success markers
+        if 'bing_genimg_v3:process: [' in line and "http" in line:
+            status = "OK"
+        # Failure markers
+        elif ('bing_genimg_v3:process: []' in line or
+              '==> Error occurs' in line or
+              '"error": "No images generated"' in line):
+            status = "FAIL"
+        # Generic traceback error marker
+        elif 'Traceback (most recent call last):' in line or 'tb:' in line:
+            status = "ERROR"
 
-            # Success marker
-            if 'bing_genimg_v3:process: [' in line and "http" in line:
-                attempts.append({"time": timestamp, "status": "OK"})
-            # Known failure marker
-            elif '"error": "No images generated"' in line:
-                attempts.append({"time": timestamp, "status": "FAIL"})
-            # Generic error marker
-            elif 'tb:' in line:
-                attempts.append({"time": timestamp, "status": "ERROR"})
-        except IndexError:
-            # This will catch cases where log format is unexpected
-            # and there are not enough lines before the current one.
-            continue
-        except Exception:
-            # Catch any other unexpected parsing error for a line
-            attempts.append({"time": "PARSE_ERROR", "status": "ERROR"})
+        if status:
+            # Find the timestamp associated with this event by looking backwards
+            timestamp = "N/A"
+            for ts_index in range(i, -1, -1):
+                if ts_index in timestamp_indices:
+                    timestamp = lines[ts_index].strip()
+                    break
+            attempts.append({"time": timestamp, "status": status})
 
     return attempts
 
@@ -268,23 +269,29 @@ def bing_api_post_gpt() -> Dict[str, Any]:
 def status_api() -> Dict[str, Any]:
     """
     API endpoint for getting the current status of the service.
+    Now with error handling.
     """
-    status_data = {
-        "service_status": "OK",
-        "cookie_fail_count": COOKIE_FAIL,
-        "total_fail_count": COOKIE_FAIL_FOR_TERMINATE,
-        "max_fail_for_rotate": MAX_COOKIE_FAIL,
-        "max_fail_for_suspend": MAX_COOKIE_FAIL_FOR_TERMINATE,
-        "requests_before_rotate": f"{REQUESTS_BEFORE_ROTATE_COOKIE}/{MAX_REQUESTS_BEFORE_ROTATE_COOKIE}",
-        "current_cookie": get_current_cookie(),
-        "last_attempts": get_last_attempts(),
-    }
+    try:
+        status_data = {
+            "service_status": "OK",
+            "cookie_fail_count": COOKIE_FAIL,
+            "total_fail_count": COOKIE_FAIL_FOR_TERMINATE,
+            "max_fail_for_rotate": MAX_COOKIE_FAIL,
+            "max_fail_for_suspend": MAX_COOKIE_FAIL_FOR_TERMINATE,
+            "requests_before_rotate": f"{REQUESTS_BEFORE_ROTATE_COOKIE}/{MAX_REQUESTS_BEFORE_ROTATE_COOKIE}",
+            "current_cookie": get_current_cookie(),
+            "last_attempts": get_last_attempts(),
+        }
 
-    if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE and SUSPEND_TIME > time.time():
-        status_data["service_status"] = "SUSPENDED"
-        status_data["time_to_restart"] = seconds_to_hms(int(SUSPEND_TIME - time.time()))
+        if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE and SUSPEND_TIME > time.time():
+            status_data["service_status"] = "SUSPENDED"
+            status_data["time_to_restart"] = seconds_to_hms(int(SUSPEND_TIME - time.time()))
 
-    return jsonify(status_data), 200
+        return jsonify(status_data), 200
+    except Exception as e:
+        error_details = traceback.format_exc()
+        my_log.log_bing_api(f'tb:status_api: {e}\n{error_details}')
+        return jsonify({"error": "Failed to get status", "details": str(e)}), 500
 
 
 @async_run
