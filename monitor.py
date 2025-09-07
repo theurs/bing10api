@@ -168,7 +168,8 @@ def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Tab
 def generate_failed_prompts_panel(prompts: List[Dict[str, str]], width: int) -> Panel:
     """Creates a Rich Panel to display the last failed prompts."""
     # Reserve some space for panel borders and padding
-    max_prompt_len = width - 15
+    # max_prompt_len = width - 15
+    max_prompt_len = 200
     content = []
     for item in prompts:
         instance_name = f"([yellow]{item['instance']}[/yellow])"
