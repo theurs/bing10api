@@ -8,3 +8,5 @@ natsort
 
 regex
 requests
+
+rich

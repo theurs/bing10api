@@ -29,6 +29,63 @@ MAX_REQUESTS_BEFORE_ROTATE_COOKIE = 50
 REQUESTS_BEFORE_ROTATE_COOKIE = 0
 
 
+def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: int = 10) -> list[dict[str, str]]:
+    """
+    Parses the log file to get the status of the last N attempts.
+    """
+    if not os.path.exists(log_file):
+        return [{"time": "N/A", "status": "LOG NOT FOUND"}]
+
+    attempts = []
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except Exception:
+        return [{"time": "N/A", "status": "LOG READ ERROR"}]
+
+    # Search backwards for attempt markers
+    for i in range(len(lines) - 1, -1, -1):
+        if len(attempts) >= num_attempts:
+            break
+        line = lines[i].strip()
+        # Success marker
+        if 'bing_genimg_v3:process: [' in line and "http" in line:
+            timestamp = lines[i-2].strip()
+            attempts.append({"time": timestamp, "status": "OK"})
+        # Known failure marker
+        elif '"error": "No images generated"' in line:
+            timestamp = lines[i-2].strip()
+            attempts.append({"time": timestamp, "status": "FAIL"})
+        # Generic error marker
+        elif 'tb:' in line:
+            timestamp = lines[i-2].strip()
+            attempts.append({"time": timestamp, "status": "ERROR"})
+
+    return attempts
+
+
+def get_current_cookie(log_file: str = 'logs/debug.log') -> str:
+    """
+    Parses the log file to find the last used cookie file name.
+    """
+    if not os.path.exists(log_file):
+        return "LOG NOT FOUND"
+
+    last_cookie_line = "Unknown"
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            for line in reversed(list(f)):
+                if 'rotate_cookie:' in line and '-> cookie.txt' in line:
+                    # Extract the source cookie filename
+                    match = re.search(r'rotate_cookie: (cookie.*?.txt) ->', line)
+                    if match:
+                        last_cookie_line = match.group(1)
+                        break
+    except Exception:
+        return "LOG READ ERROR"
+    return last_cookie_line
+
+
 ## rest api #######################################################################
 
 
@@ -191,6 +248,29 @@ def bing_api_post_gpt() -> Dict[str, Any]:
     :return: A JSON response containing a list of URLs or an error message.
     """
     return bing(request.get_json(), 1, model='gpt4o')
+
+
+@FLASK_APP.route('/status', methods=['GET'])
+def status_api() -> Dict[str, Any]:
+    """
+    API endpoint for getting the current status of the service.
+    """
+    status_data = {
+        "service_status": "OK",
+        "cookie_fail_count": COOKIE_FAIL,
+        "total_fail_count": COOKIE_FAIL_FOR_TERMINATE,
+        "max_fail_for_rotate": MAX_COOKIE_FAIL,
+        "max_fail_for_suspend": MAX_COOKIE_FAIL_FOR_TERMINATE,
+        "requests_before_rotate": f"{REQUESTS_BEFORE_ROTATE_COOKIE}/{MAX_REQUESTS_BEFORE_ROTATE_COOKIE}",
+        "current_cookie": get_current_cookie(),
+        "last_attempts": get_last_attempts(),
+    }
+
+    if COOKIE_FAIL_FOR_TERMINATE >= MAX_COOKIE_FAIL_FOR_TERMINATE and SUSPEND_TIME > time.time():
+        status_data["service_status"] = "SUSPENDED"
+        status_data["time_to_restart"] = seconds_to_hms(int(SUSPEND_TIME - time.time()))
+
+    return jsonify(status_data), 200
 
 
 @async_run
