@@ -31,12 +31,17 @@ def ping_host(host: str, timeout: int = 2, count: int = 1) -> Dict[str, Any]:
     This requires privileged access (run with sudo or use setcap).
     """
     try:
+        # This MUST be True to work on your system, as proven by testing.
         result = ping(host, count=count, timeout=timeout, privileged=True)
+
         if result.is_alive:
+            # result.avg_rtt is in milliseconds
             return {"status": "online", "latency": result.avg_rtt}
         else:
             return {"status": "offline", "error": "Host unreachable"}
+
     except (ICMPLibError, PermissionError) as e:
+        # Catch permission errors if not run with sudo/setcap
         return {"status": "offline", "error": str(e)}
 
 
@@ -54,9 +59,16 @@ def generate_table() -> Table:
         data = get_status(instance["url"])
         if "error" in data:
             table.add_row(
-                instance["name"], "[bold red]OFFLINE[/bold red]", "N/A", "N/A", "N/A", data.get("error")
+                instance["name"],
+                "[bold red]OFFLINE[/bold red]",
+                "N/A",
+                "N/A",
+                "N/A",
+                data.get("error"),
             )
             continue
+
+        # Status color coding
         status = data.get("service_status", "UNKNOWN")
         if status == "OK":
             status_str = f"[bold green]{status}[/bold green]"
@@ -64,10 +76,13 @@ def generate_table() -> Table:
             status_str = f"[bold red]{status}[/bold red]\nRestart in {data.get('time_to_restart', 'N/A')}"
         else:
             status_str = f"[yellow]{status}[/yellow]"
+
+        # Attempts visualization
         attempts = "".join(
             "[green]■[/green]" if attempt["status"] == "OK" else "[red]■[/red]"
             for attempt in reversed(data.get("last_attempts", []))
         )
+
         table.add_row(
             instance["name"],
             status_str,
@@ -80,14 +95,17 @@ def generate_table() -> Table:
 
 
 def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Table:
-    """Generates a Rich Table for ping status with a multi-line sparkline."""
-    SPARKLINE_HEIGHT = 4  # Height of the graph in characters
-    MAX_LATENCY_FOR_SCALE = 500  # ms, anything higher gets the max bar height
+    """Generates a Rich Table for ping status with a latency sparkline."""
+    # Characters from low to high latency
+    SPARKLINE_CHARS = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+    # We'll scale latency up to this value. Anything higher gets the max block.
+    MAX_LATENCY_FOR_SCALE = 500  # ms
 
     table = Table(title="[bold cyan]Ping Status[/bold cyan]")
     table.add_column("Target", style="cyan", no_wrap=True)
     table.add_column("Status", style="white")
     table.add_column("Latency (ms)", style="yellow")
+    # The column must not wrap lines to keep the sparkline intact
     table.add_column("Latency History", style="green", no_wrap=True)
 
     if not history:
@@ -101,33 +119,28 @@ def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Tab
         if status == "online"
         else f"[bold red]OFFLINE[/bold red]"
     )
+
     latency = last_result.get("latency")
     latency_str = f"{latency:.2f}" if latency is not None else "N/A"
 
-    # --- Multi-line Sparkline Generation ---
-    graph_rows = [""] * SPARKLINE_HEIGHT
+    # --- Sparkline generation logic ---
+    bars = []
     for attempt in history:
         if attempt.get("status") == "online":
             ping_ms = attempt.get("latency", 0)
+            # Clamp latency to our max scale value
             clamped_ping = min(ping_ms, MAX_LATENCY_FOR_SCALE)
-            # Calculate how many blocks to fill, from 0 to SPARKLINE_HEIGHT
-            fill_height = int(
-                (clamped_ping / MAX_LATENCY_FOR_SCALE) * SPARKLINE_HEIGHT
+            # Calculate index for the character list
+            index = int(
+                (clamped_ping / MAX_LATENCY_FOR_SCALE) * (len(SPARKLINE_CHARS) - 1)
             )
-
-            # Build the column of characters from bottom to top
-            for i in range(SPARKLINE_HEIGHT):
-                # i=0 is the bottom row, i=3 is the top row
-                char = '█' if i < fill_height else ' '
-                # Add character to the correct row string
-                graph_rows[SPARKLINE_HEIGHT - 1 - i] += f"[green]{char}[/green]"
+            char = SPARKLINE_CHARS[index]
+            bars.append(f"[green]{char}[/green]")
         else:
-            # For offline pings, draw a full red bar
-            for i in range(SPARKLINE_HEIGHT):
-                graph_rows[i] += f"[red]█[/red]"
-
-    sparkline = "\n".join(graph_rows)
-    # --- End of Sparkline Logic ---
+            # A full, red block for failures
+            bars.append(f"[red]█[/red]")
+    sparkline = "".join(bars)
+    # --- End of sparkline logic ---
 
     table.add_row(ping_target, status_str, latency_str, sparkline)
     return table
@@ -136,11 +149,14 @@ def generate_ping_table(ping_target: str, history: Deque[Dict[str, Any]]) -> Tab
 if __name__ == "__main__":
     console = Console()
 
+    # Check if ping target is configured
     ping_enabled = hasattr(cfg, "PING_TARGET") and cfg.PING_TARGET
 
+    # --- Dynamic deque size based on terminal width ---
     # Reserve ~55 characters for other columns, borders, and padding
     sparkline_width = max(10, console.width - 55)
     ping_history: Deque[Dict[str, Any]] = deque(maxlen=sparkline_width)
+    # --- End of dynamic deque logic ---
 
     def generate_layout() -> Group:
         """Generates the complete layout with all tables."""
