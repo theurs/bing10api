@@ -46,7 +46,7 @@ def ping_host(host: str, timeout: int = 2, count: int = 1) -> Dict[str, Any]:
         return {"status": "offline", "error": str(e)}
 
 
-def generate_table() -> Tuple[Table, List[Dict[str, str]]]:
+def generate_table() -> Tuple[Table, List[Dict[str, Any]]]:
     """
     Generates a Rich Table with data from all instances and collects failed prompts.
     """
@@ -58,7 +58,7 @@ def generate_table() -> Tuple[Table, List[Dict[str, str]]]:
     table.add_column("Total Fails", style="red")
     table.add_column("Last 10 Attempts", style="green")
 
-    all_failed_prompts: List[Dict[str, str]] = []
+    all_failed_prompts: List[Dict[str, Any]] = []
 
     for instance in INSTANCES:
         data = get_status(instance["url"])
@@ -97,18 +97,24 @@ def generate_table() -> Tuple[Table, List[Dict[str, str]]]:
             attempts,
         )
 
-        # Collect failed prompts
+        # Collect failed prompts, which are now dicts with timestamps
         failed_prompts = data.get("last_failed_prompts", [])
-        for prompt in failed_prompts:
-            all_failed_prompts.append({"instance": instance["name"], "prompt": prompt})
+        for prompt_data in failed_prompts:
+            # Add instance name to each prompt's data
+            prompt_data['instance'] = instance['name']
+            all_failed_prompts.append(prompt_data)
 
-    # Return unique prompts, preserving order of first appearance
+    # Sort all collected prompts by timestamp, newest first
+    all_failed_prompts.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+
+    # Remove duplicates based on prompt text, keeping the newest entry
     unique_prompts = []
     seen_prompts = set()
     for item in all_failed_prompts:
-        if item["prompt"] not in seen_prompts:
+        prompt_text = item.get("prompt")
+        if prompt_text and prompt_text not in seen_prompts:
             unique_prompts.append(item)
-            seen_prompts.add(item["prompt"])
+            seen_prompts.add(prompt_text)
 
     return table, unique_prompts
 

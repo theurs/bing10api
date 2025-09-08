@@ -30,8 +30,8 @@ SUSPEND_TIME_SET = 12 * 60 * 60  # время в секундах до след�
 MAX_REQUESTS_BEFORE_ROTATE_COOKIE = 50
 REQUESTS_BEFORE_ROTATE_COOKIE = 0
 
-# Global deque to store the last 5 failed prompts
-FAILED_PROMPTS: Deque[str] = deque(maxlen=5)
+# Global deque to store the last 5 failed prompts with their timestamps
+FAILED_PROMPTS: Deque[Dict[str, Any]] = deque(maxlen=5)
 
 
 def get_last_attempts(log_file: str = 'logs/debug_bing_api.log', num_attempts: int = 10) -> list[dict[str, str]]:
@@ -111,7 +111,7 @@ def get_current_cookie(log_file: str = 'logs/debug.log') -> str:
 FLASK_APP = Flask(__name__)
 
 
-def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Any:
+def bing(j: Dict[str, Any], iterations: int = 1, model: str = 'dalle') -> Any:
     '''
     Делает 1 запрос на рисование бингом.
     Если не получилось - возвращает ошибку.
@@ -173,8 +173,11 @@ def bing(j: Dict[str, Any], iterations=1, model: str = 'dalle') -> Any:
         if not image_urls:
             COOKIE_FAIL += 1
             COOKIE_FAIL_FOR_TERMINATE += 1
-            # Add the failed prompt to our deque
-            FAILED_PROMPTS.appendleft(prompt)
+            # Add the failed prompt with a timestamp to our deque
+            FAILED_PROMPTS.appendleft({
+                "timestamp": time.time(),
+                "prompt": prompt,
+            })
 
             if COOKIE_FAIL >= MAX_COOKIE_FAIL:
                 COOKIE_FAIL = 0
