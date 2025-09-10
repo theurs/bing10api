@@ -1,5 +1,9 @@
 # monitor.py
+
+
+import sqlite3
 import time
+
 from collections import deque
 from typing import Any, Deque, Dict, List, Tuple
 
@@ -14,6 +18,28 @@ from rich.table import Table
 
 # Take instance URLs from the config file
 INSTANCES: List[Dict[str, Any]] = cfg.MONITOR_INSTANCES
+
+
+def get_queue_size(db_path: str) -> int:
+    """
+    Safely gets the number of records from the log queue SQLite DB.
+    Connects in read-only mode to prevent locking the database.
+    Returns -1 if the database or table cannot be accessed.
+    """
+    # Build a URI for read-only connection
+    db_uri = f"file:{db_path}?mode=ro"
+    try:
+        # Use the URI connection string
+        with sqlite3.connect(db_uri, uri=True, timeout=1) as conn:
+            cursor = conn.cursor()
+            # The table 'unnamed' is the default name used by SqliteDict
+            cursor.execute("SELECT count(*) FROM unnamed;")
+            # fetchone() returns a tuple, e.g., (123,)
+            count = cursor.fetchone()[0]
+            return count
+    except (sqlite3.OperationalError, FileNotFoundError):
+        # Return -1 to indicate an error (e.g., DB not found, table missing)
+        return -1
 
 
 def get_status(url: str) -> Dict[str, Any]:
@@ -48,9 +74,28 @@ def ping_host(host: str, timeout: int = 2, count: int = 1) -> Dict[str, Any]:
 
 def generate_table() -> Tuple[Table, List[Dict[str, Any]]]:
     """
-    Generates a Rich Table with data from all instances and collects failed prompts.
+    Generates a Rich Table with instance data and a dynamic title with queue size.
     """
-    table = Table(title="[bold cyan]Bing API Instances Status[/bold cyan]")
+    title = "[bold cyan]Bing API Instances Status[/bold cyan]"
+
+    # Check if queue monitoring is enabled in the config
+    if hasattr(cfg, "QUEUE_DB_PATH") and cfg.QUEUE_DB_PATH:
+        queue_size = get_queue_size(cfg.QUEUE_DB_PATH)
+        if queue_size != -1:  # -1 indicates an error
+            if queue_size > 1000:
+                color = "bold red"
+            elif queue_size > 300:
+                color = "yellow"
+            elif queue_size > 50:
+                color = "cyan"
+            else:
+                color = "green"
+            title += f" | Log Queue: [{color}]{queue_size}[/{color}]"
+        else:
+            # Display an error if the queue size could not be determined
+            title += " | Log Queue: [bold red]ERROR[/bold red]"
+
+    table = Table(title=title)
     table.add_column("Instance", style="cyan", no_wrap=True)
     table.add_column("Status", style="white")
     table.add_column("Cookie", style="yellow")
