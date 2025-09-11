@@ -220,10 +220,10 @@ def generate_failed_prompts_panel(prompts: List[Dict[str, str]], width: int) -> 
     """Creates a Rich Panel to display the last failed prompts."""
     # Reserve some space for panel borders and padding
     # max_prompt_len = width - 15
-    max_prompt_len = 400
+    max_prompt_len = 500
     content = []
-    # Ограничиваем количество промптов до 5
-    for item in prompts[:5]:
+    # Ограничиваем количество промптов до 4
+    for item in prompts[:4]:
         instance_name = f"([yellow]{item['instance']}[/yellow])"
         prompt_text = item['prompt'].replace('\n', ' ')
         if len(prompt_text) > max_prompt_len:
