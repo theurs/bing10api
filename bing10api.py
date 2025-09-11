@@ -21,7 +21,7 @@ MAX_COOKIE_FAIL = 5
 COOKIE_FAIL = 0
 COOKIE_INITIALIZED = False
 # сколько раз подряд должно быть фейлов что бы принять меры - выключить сервис
-MAX_COOKIE_FAIL_FOR_TERMINATE = 20
+MAX_COOKIE_FAIL_FOR_TERMINATE = 10
 COOKIE_FAIL_FOR_TERMINATE = 0
 SUSPEND_TIME = 0  # время когда можно снова запустить сервис
 SUSPEND_TIME_SET = 12 * 60 * 60  # время в секундах до следующего запуска сервиса (12 часов)
