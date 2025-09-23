@@ -229,6 +229,10 @@ def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '1') -> li
     ar = 2 - 1792x1024
     ar = 3 - 1024x1792
     '''
+    if model == 'gpt4o':
+        ar = '2'
+    else:
+        ar = '1'
     brush = BingBrush(cookie='cookie.txt')
     r = brush.process(prompt, model=model, ar=ar)
     cleaned_urls = [url.split('?')[0] if '?' in url else url for url in r]
