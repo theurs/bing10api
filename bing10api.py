@@ -6,7 +6,7 @@ import subprocess
 import time
 import traceback
 from collections import deque
-from typing import Any, Deque, Dict, List
+from typing import Any, Deque, Dict, List, Optional
 
 from flask import Flask, jsonify, request
 
@@ -163,12 +163,13 @@ def bing(j: Dict[str, Any], iterations: int = 1, model: str = 'dalle') -> Any:
 
         # Extract the prompt from the JSON data
         prompt: str = data.get('prompt', '')
+        ar: Optional[int] = data.get('ar', None)
 
         if not prompt:
             return jsonify({"error": "Prompt is required"}), 400
 
         # Generate images using Bing API
-        image_urls: List[str] = my_genimg.gen_images_bing_only(prompt, iterations, model=model)
+        image_urls: List[str] = my_genimg.gen_images_bing_only(prompt, iterations, model=model, ar=ar)
 
         if not image_urls:
             COOKIE_FAIL += 1
