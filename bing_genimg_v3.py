@@ -222,14 +222,13 @@ class BingBrush:
             return []
 
 
-def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '2') -> list:
+def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '1') -> list:
     '''
     ar = None - 1024x1024
     ar = 1 - 1024x1024
     ar = 2 - 1792x1024
     ar = 3 - 1024x1792
     '''
-    ar = '2'
     brush = BingBrush(cookie='cookie.txt')
     r = brush.process(prompt, model=model, ar=ar)
     cleaned_urls = [url.split('?')[0] if '?' in url else url for url in r]
