@@ -9,6 +9,7 @@ import random
 import time
 import traceback
 from http.cookies import SimpleCookie
+from typing import Optional
 
 import regex
 import requests
@@ -154,8 +155,7 @@ class BingBrush:
 
         return list(set(normal_image_links))
 
-
-    def send_request(self, prompt, model="gpt4o", rt_type=4):
+    def send_request(self, prompt, model="gpt4o", rt_type=4, ar: Optional[int] = None):
         # Маппинг имени модели на ее ID
         model_id = "1" if model == "gpt4o" else "0"
 
@@ -164,6 +164,8 @@ class BingBrush:
 
         # Используем model_id вместо имени
         url = f"https://www.bing.com/images/create?q={url_encoded_prompt}&rt={rt_type}&mdl={model_id}&FORM=GENCRE"
+        if ar is not None:
+            url += f"&ar={ar}"
 
         response = self.session.post(
             url,
@@ -173,14 +175,15 @@ class BingBrush:
         )
         return response, url_encoded_prompt
 
-    def process(self, prompt, model="dalle"):
+    def process(self, prompt, model="dalle", ar: Optional[int] = None):
         """
         Основной метод для генерации изображений.
         model: "dalle" или "gpt4o"
+        ar: optional int for aspect ratio. For example, 1 for square.
         """
         try:
             # Сначала пробуем быстрый канал (rt=4)
-            response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=4)
+            response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=4, ar=ar)
 
             if response.status_code != 302:
                 self.process_error(response)
@@ -193,7 +196,7 @@ class BingBrush:
             # Если бусты кончились, пробуем медленный (rt=3)
             if redirect_url is None:
                 my_log.log_bing_api('bing_genimg_v3:process: ==> Your boosts have run out, using the slow generating pipeline, please wait...')
-                response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=3)
+                response, url_encoded_prompt = self.send_request(prompt, model=model, rt_type=3, ar=ar)
                 redirect_url, request_id = self.request_result_urls(
                     response, url_encoded_prompt
                 )
@@ -213,19 +216,29 @@ class BingBrush:
                 my_log.log_bing_api(f'bing_genimg_v3:process: {img_urls}')
                 return img_urls
 
-
         except Exception as unknown_error:
             traceback_error = traceback.format_exc()
             my_log.log_bing_api(f'bing_genimg_v3:process: {unknown_error}\n\n{traceback_error}')
             return []
 
 
-def gen_images(prompt: str, model: str = 'dalle') -> list:
+def gen_images(prompt: str, model: str = 'dalle', ar: Optional[int] = 2) -> list:
+    '''
+    ar = None - 1024x1024
+    ar = 1 - 1024x1024
+    ar = 2 - 1792x1024
+    ar = 3 - 1024x1792
+    '''
     brush = BingBrush(cookie='cookie.txt')
-    r = brush.process(prompt, model=model)
-    return r
+    r = brush.process(prompt, model=model, ar=ar)
+    cleaned_urls = [url.split('?')[0] if '?' in url else url for url in r]
+    return cleaned_urls
 
 
 if __name__ == "__main__":
-    print(gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o'))
-    # print(gen_images('кепка, на кепке написано кирилицей - Удача', model='dalle'))
+    # images = gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o', ar=3)
+    images = gen_images('кепка, на кепке написано кирилицей - Удача', model='dalle', ar=1)
+
+    if images:
+        for image in images:
+            print(image)
