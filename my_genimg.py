@@ -14,7 +14,7 @@ import my_log
 BING_LOCK = threading.Lock()
 
 
-def bing(prompt: str, model: str = 'dalle', ar: Optional[int] = None) -> list:
+def bing(prompt: str, model: str = 'dalle', ar: Optional[str] = None) -> list:
     """
     Рисует бингом, не больше 1 потока и 20 секунд пауза между запросами
     Ограничение на размер промпта 950, хз почему
@@ -43,7 +43,7 @@ def bing(prompt: str, model: str = 'dalle', ar: Optional[int] = None) -> list:
     return []
 
 
-def gen_images_bing_only(prompt: str, iterations: int = 1, model: str = 'dalle', ar: Optional[int] = None) -> list:
+def gen_images_bing_only(prompt: str, iterations: int = 1, model: str = 'dalle', ar: Optional[str] = None) -> list:
     if iterations == 0:
         iterations = 1
 

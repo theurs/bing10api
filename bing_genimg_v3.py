@@ -155,7 +155,7 @@ class BingBrush:
 
         return list(set(normal_image_links))
 
-    def send_request(self, prompt, model="gpt4o", rt_type=4, ar: Optional[int] = None):
+    def send_request(self, prompt, model="gpt4o", rt_type=4, ar: Optional[str] = None):
         # Маппинг имени модели на ее ID
         model_id = "1" if model == "gpt4o" else "0"
 
@@ -175,7 +175,7 @@ class BingBrush:
         )
         return response, url_encoded_prompt
 
-    def process(self, prompt, model="dalle", ar: Optional[int] = None):
+    def process(self, prompt, model="dalle", ar: Optional[str] = None):
         """
         Основной метод для генерации изображений.
         model: "dalle" или "gpt4o"
@@ -222,7 +222,7 @@ class BingBrush:
             return []
 
 
-def gen_images(prompt: str, model: str = 'dalle', ar: Optional[int] = 2) -> list:
+def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '1') -> list:
     '''
     ar = None - 1024x1024
     ar = 1 - 1024x1024
