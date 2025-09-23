@@ -229,6 +229,7 @@ def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '2') -> li
     ar = 2 - 1792x1024
     ar = 3 - 1024x1792
     '''
+    ar = '2'
     brush = BingBrush(cookie='cookie.txt')
     r = brush.process(prompt, model=model, ar=ar)
     cleaned_urls = [url.split('?')[0] if '?' in url else url for url in r]
@@ -236,8 +237,8 @@ def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '2') -> li
 
 
 if __name__ == "__main__":
-    # images = gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o', ar=3)
-    images = gen_images('кепка, на кепке написано кирилицей - Удача', model='dalle', ar=1)
+    # images = gen_images('кепка, на кепке написано кирилицей - Удача', model='gpt4o', ar='3')
+    images = gen_images('кепка, на кепке написано кирилицей - Удача', model='dalle', ar='1')
 
     if images:
         for image in images:
