@@ -222,7 +222,7 @@ class BingBrush:
             return []
 
 
-def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '1') -> list:
+def gen_images(prompt: str, model: str = 'dalle', ar: Optional[str] = '2') -> list:
     '''
     ar = None - 1024x1024
     ar = 1 - 1024x1024
